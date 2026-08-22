@@ -20,4 +20,5 @@ Repository for modern data engineering notes, examples, patterns, and projects.
 ## Projects
 
 - `projects/customer-churn-pipeline/`
+- `projects/openfda-safety-analytics/`
 - `projects/streaming-api-lakehouse/`

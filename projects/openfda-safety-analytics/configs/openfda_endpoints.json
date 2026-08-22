@@ -1,0 +1,27 @@
+{
+  "base_url": "https://api.fda.gov",
+  "default_limit": 100,
+  "endpoints": [
+    {
+      "name": "drug_adverse_events",
+      "path": "/drug/event.json",
+      "domain": "Healthcare / Drug Safety",
+      "date_field": "receivedate",
+      "description": "Drug adverse event reports."
+    },
+    {
+      "name": "device_adverse_events",
+      "path": "/device/event.json",
+      "domain": "Healthcare / Medical Device Safety",
+      "date_field": "date_received",
+      "description": "Medical device adverse event reports."
+    },
+    {
+      "name": "food_adverse_events",
+      "path": "/food/event.json",
+      "domain": "Healthcare / Food Safety",
+      "date_field": "date_started",
+      "description": "Food adverse event reports."
+    }
+  ]
+}
