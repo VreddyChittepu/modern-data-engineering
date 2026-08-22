@@ -16,3 +16,8 @@ Repository for modern data engineering notes, examples, patterns, and projects.
 - `performance-tuning/`
 - `design-patterns/`
 - `projects/`
+
+## Projects
+
+- `projects/customer-churn-pipeline/`
+- `projects/streaming-api-lakehouse/`

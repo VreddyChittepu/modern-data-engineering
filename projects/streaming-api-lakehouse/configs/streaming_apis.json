@@ -1,0 +1,95 @@
+{
+  "raw_topic": "api.raw.events",
+  "apis": [
+    {
+      "name": "wikimedia_eventstreams",
+      "display_name": "Wikimedia EventStreams / APIs",
+      "domain": "Streaming / Media",
+      "access": "Public",
+      "url": "https://stream.wikimedia.org/v2/stream/recentchange",
+      "ingestion_mode": "server_sent_events",
+      "event_type": "recentchange",
+      "project_idea": "Use real-time Wikimedia changes for Kafka/Spark Streaming practice."
+    },
+    {
+      "name": "mta_realtime",
+      "display_name": "MTA Real-Time API",
+      "domain": "Metro / Transit",
+      "access": "Free",
+      "url": "https://api.mta.info/",
+      "ingestion_mode": "polling_or_gtfs_realtime",
+      "event_type": "transit_update",
+      "project_idea": "Consume New York subway real-time feeds and detect delays and service disruptions."
+    },
+    {
+      "name": "coinbase_exchange",
+      "display_name": "Coinbase Exchange API",
+      "domain": "Crypto / Trading",
+      "access": "Public market-data endpoints",
+      "url": "https://api.exchange.coinbase.com/",
+      "ingestion_mode": "polling_or_market_feed",
+      "event_type": "market_data",
+      "project_idea": "Capture trades or order-book snapshots for streaming market-data analytics."
+    },
+    {
+      "name": "opensky_network",
+      "display_name": "OpenSky Network API",
+      "domain": "Aviation",
+      "access": "Free personal/research access",
+      "url": "https://opensky-network.org/api/states/all",
+      "ingestion_mode": "polling",
+      "event_type": "aircraft_position",
+      "project_idea": "Capture aircraft positions periodically and analyze flight movement and airspace density."
+    },
+    {
+      "name": "usgs_earthquake",
+      "display_name": "USGS Earthquake API",
+      "domain": "Geospatial / Disaster",
+      "access": "Public",
+      "url": "https://earthquake.usgs.gov/fdsnws/event/1/query",
+      "ingestion_mode": "incremental_polling",
+      "event_type": "earthquake_event",
+      "project_idea": "Incrementally ingest earthquake events and create severity dashboards by region, magnitude and time."
+    },
+    {
+      "name": "usgs_water_services",
+      "display_name": "USGS Water Services",
+      "domain": "Environment / IoT",
+      "access": "Public",
+      "url": "https://waterservices.usgs.gov/",
+      "ingestion_mode": "sensor_polling",
+      "event_type": "water_measurement",
+      "project_idea": "Ingest river, streamflow and water measurements as sensor-style time-series data."
+    },
+    {
+      "name": "opensensemap",
+      "display_name": "openSenseMap API",
+      "domain": "IoT",
+      "access": "Open / public",
+      "url": "https://api.opensensemap.org/",
+      "ingestion_mode": "sensor_polling",
+      "event_type": "environment_sensor_reading",
+      "project_idea": "Consume environmental sensor readings and build streaming-style aggregation use cases."
+    },
+    {
+      "name": "gdelt",
+      "display_name": "GDELT API",
+      "domain": "Global News",
+      "access": "Public",
+      "url": "https://www.gdeltproject.org/data.html#apis",
+      "ingestion_mode": "continuous_polling",
+      "event_type": "news_event",
+      "project_idea": "Continuously ingest worldwide news and analyze events, countries and topics."
+    },
+    {
+      "name": "hacker_news",
+      "display_name": "Hacker News API",
+      "domain": "Social / Technology",
+      "access": "Public",
+      "url": "https://hacker-news.firebaseio.com/v0/",
+      "ingestion_mode": "continuous_polling",
+      "event_type": "social_technology_event",
+      "project_idea": "Ingest stories and comments to build trending-topic and engagement analytics."
+    }
+  ]
+}
