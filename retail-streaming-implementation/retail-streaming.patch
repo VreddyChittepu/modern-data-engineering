@@ -1,0 +1,1440 @@
+From 78d4daed58ccc27d47ce53da6cc64696129a01d2 Mon Sep 17 00:00:00 2001
+From: Codex <codex@users.noreply.github.com>
+Date: Sun, 6 Sep 2026 14:04:19 +0000
+Subject: [PATCH] Add retail Databricks streaming medallion pipeline with CDC
+ and tests
+
+---
+ .github/workflows/retail-ci.yml               |  26 ++
+ .github/workflows/retail-deploy.yml           |  43 ++++
+ README.md                                     |   2 +
+ .../databricks-streaming-pipeline/.gitignore  |   9 +
+ .../databricks-streaming-pipeline/README.md   | 231 ++++++++++++++++++
+ .../databricks.yml                            |  42 ++++
+ .../docs/operations.md                        |  21 ++
+ .../docs/validation-results.md                |  26 ++
+ .../pyproject.toml                            |  23 ++
+ .../resources/jobs.yml                        |  20 ++
+ .../resources/pipeline.yml                    |  27 ++
+ .../sample_data/scenarios.json                |  18 ++
+ .../scripts/__init__.py                       |   0
+ .../scripts/acceptance.py                     |  20 ++
+ .../scripts/bootstrap.py                      |  13 +
+ .../scripts/cdf_consumer.py                   |  17 ++
+ .../scripts/generate.py                       | 106 ++++++++
+ .../scripts/replay.py                         |  23 ++
+ .../sql/security.sql                          |  12 +
+ .../sql/validation.sql                        |  18 ++
+ .../src/pipeline.py                           | 180 ++++++++++++++
+ .../src/retail/__init__.py                    |   1 +
+ .../src/retail/config.py                      |  31 +++
+ .../src/retail/schemas.py                     |  21 ++
+ .../src/retail/transforms.py                  | 128 ++++++++++
+ .../tests/__init__.py                         |   0
+ .../tests/conftest.py                         |  13 +
+ .../tests/integration/test_medallion.py       |  14 ++
+ .../tests/streaming/test_recovery.py          |  31 +++
+ .../tests/unit/__init__.py                    |   0
+ .../tests/unit/test_transforms.py             |  72 ++++++
+ 31 files changed, 1188 insertions(+)
+ create mode 100644 .github/workflows/retail-ci.yml
+ create mode 100644 .github/workflows/retail-deploy.yml
+ create mode 100644 projects/databricks-streaming-pipeline/.gitignore
+ create mode 100644 projects/databricks-streaming-pipeline/README.md
+ create mode 100644 projects/databricks-streaming-pipeline/databricks.yml
+ create mode 100644 projects/databricks-streaming-pipeline/docs/operations.md
+ create mode 100644 projects/databricks-streaming-pipeline/docs/validation-results.md
+ create mode 100644 projects/databricks-streaming-pipeline/pyproject.toml
+ create mode 100644 projects/databricks-streaming-pipeline/resources/jobs.yml
+ create mode 100644 projects/databricks-streaming-pipeline/resources/pipeline.yml
+ create mode 100644 projects/databricks-streaming-pipeline/sample_data/scenarios.json
+ create mode 100644 projects/databricks-streaming-pipeline/scripts/__init__.py
+ create mode 100644 projects/databricks-streaming-pipeline/scripts/acceptance.py
+ create mode 100644 projects/databricks-streaming-pipeline/scripts/bootstrap.py
+ create mode 100644 projects/databricks-streaming-pipeline/scripts/cdf_consumer.py
+ create mode 100644 projects/databricks-streaming-pipeline/scripts/generate.py
+ create mode 100644 projects/databricks-streaming-pipeline/scripts/replay.py
+ create mode 100644 projects/databricks-streaming-pipeline/sql/security.sql
+ create mode 100644 projects/databricks-streaming-pipeline/sql/validation.sql
+ create mode 100644 projects/databricks-streaming-pipeline/src/pipeline.py
+ create mode 100644 projects/databricks-streaming-pipeline/src/retail/__init__.py
+ create mode 100644 projects/databricks-streaming-pipeline/src/retail/config.py
+ create mode 100644 projects/databricks-streaming-pipeline/src/retail/schemas.py
+ create mode 100644 projects/databricks-streaming-pipeline/src/retail/transforms.py
+ create mode 100644 projects/databricks-streaming-pipeline/tests/__init__.py
+ create mode 100644 projects/databricks-streaming-pipeline/tests/conftest.py
+ create mode 100644 projects/databricks-streaming-pipeline/tests/integration/test_medallion.py
+ create mode 100644 projects/databricks-streaming-pipeline/tests/streaming/test_recovery.py
+ create mode 100644 projects/databricks-streaming-pipeline/tests/unit/__init__.py
+ create mode 100644 projects/databricks-streaming-pipeline/tests/unit/test_transforms.py
+
+diff --git a/.github/workflows/retail-ci.yml b/.github/workflows/retail-ci.yml
+new file mode 100644
+index 0000000..79ee6d5
+--- /dev/null
++++ b/.github/workflows/retail-ci.yml
+@@ -0,0 +1,26 @@
++name: Retail streaming CI
++on:
++  pull_request:
++    paths: ['projects/databricks-streaming-pipeline/**', '.github/workflows/retail-*.yml']
++  push:
++    paths: ['projects/databricks-streaming-pipeline/**', '.github/workflows/retail-*.yml']
++permissions:
++  contents: read
++jobs:
++  test:
++    runs-on: ubuntu-latest
++    defaults:
++      run:
++        working-directory: projects/databricks-streaming-pipeline
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.11'
++      - uses: actions/setup-java@v4
++        with:
++          distribution: temurin
++          java-version: '17'
++      - run: python -m pip install -e '.[test]'
++      - run: python -m ruff check .
++      - run: python -m pytest -q
+diff --git a/.github/workflows/retail-deploy.yml b/.github/workflows/retail-deploy.yml
+new file mode 100644
+index 0000000..cdb662a
+--- /dev/null
++++ b/.github/workflows/retail-deploy.yml
+@@ -0,0 +1,43 @@
++name: Deploy retail streaming
++on:
++  workflow_dispatch:
++    inputs:
++      target:
++        type: choice
++        options: [dev, test, prod]
++        default: dev
++        required: true
++permissions:
++  contents: read
++concurrency:
++  group: retail-deploy-${{ inputs.target }}
++  cancel-in-progress: false
++jobs:
++  deploy:
++    runs-on: ubuntu-latest
++    environment: retail-${{ inputs.target }}
++    defaults:
++      run:
++        working-directory: projects/databricks-streaming-pipeline
++    env:
++      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
++      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
++      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
++      DATABRICKS_AUTH_TYPE: oauth-m2m
++      BUNDLE_VAR_service_principal: ${{ secrets.DATABRICKS_CLIENT_ID }}
++      DEPLOY_TARGET: ${{ inputs.target }}
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.11'
++      - uses: actions/setup-java@v4
++        with:
++          distribution: temurin
++          java-version: '17'
++      - uses: databricks/setup-cli@main
++      - run: python -m pip install -e '.[test]'
++      - run: python -m ruff check .
++      - run: python -m pytest -q
++      - run: databricks bundle validate -t "$DEPLOY_TARGET"
++      - run: databricks bundle deploy -t "$DEPLOY_TARGET"
+diff --git a/README.md b/README.md
+index d7bbb5b..5b000e6 100644
+--- a/README.md
++++ b/README.md
+@@ -22,3 +22,5 @@ Repository for modern data engineering notes, examples, patterns, and projects.
+ - `projects/customer-churn-pipeline/`
+ - `projects/openfda-safety-analytics/`
+ - `projects/streaming-api-lakehouse/`
++
++- [Retail Databricks streaming pipeline](projects/databricks-streaming-pipeline/README.md): nested JSON, Auto Loader, quality/quarantine, CDC/SCD, Gold metrics, tests and deployment.
+diff --git a/projects/databricks-streaming-pipeline/.gitignore b/projects/databricks-streaming-pipeline/.gitignore
+new file mode 100644
+index 0000000..18fd427
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/.gitignore
+@@ -0,0 +1,9 @@
++__pycache__/
++*.pyc
++.pytest_cache/
++.ruff_cache/
++.venv/
++.databricks/
++*.egg-info/
++local_landing/
++artifacts/
+diff --git a/projects/databricks-streaming-pipeline/README.md b/projects/databricks-streaming-pipeline/README.md
+new file mode 100644
+index 0000000..a3d5a1d
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/README.md
+@@ -0,0 +1,231 @@
++# Retail streaming lakehouse
++
++Deployable Databricks portfolio implementation of complex NDJSON → Auto Loader → Bronze → quality checks → Silver → AUTO CDC / SCD1 / SCD2 → Gold. Runtime-specific acceptance remains a deployment gate; local tests do not certify Databricks execution or production capacity.
++
++## 1. Architecture overview
++
++Immutable source files are the replay log. Raw text preserves source payloads, including malformed JSON. A parallel JSON schema probe captures Auto Loader rescued fields. Validated rows split into quarantine, an event-time deduplicated analytics stream, and an unwatermarked sequence-aware CDC stream. Mutable current-state tables feed materialized business views; immutable creation facts feed finalized streaming windows.
++
++## 2. Architecture diagram
++
++```mermaid
++flowchart TD
++  A["Immutable NDJSON files"] --> B["Bronze raw text"]
++  A --> R["Auto Loader schema probe"]
++  B --> D["Validation and audit"]
++  D --> Q["Quarantine and late audit"]
++  D --> E["Deduplicated events"]
++  D --> C["Sequence-aware AUTO CDC"]
++  C --> H["Customer SCD1 and SCD2"]
++  C --> O["Current orders"]
++  H --> G["Gold materialized views"]
++  O --> G
++  E --> F["Order-created facts"]
++  F --> W["Finalized event-time windows"]
++  F --> P["Provisional dashboard"]
++```
++
++## 3. Business scenario
++
++Retail orders have multiple items, payments and shipments; customers have multiple addresses. CDC updates contain full after-images and deletes contain the business key in the before-image. Sequence numbers are monotonic per entity/key; timestamps are expected to follow the same business ordering. ORDER_CANCELLED is an UPDATE with status CANCELLED. ORDER_DELETED is a physical current-state deletion. Payments and shipments are append-only event logs; they are not added again to order revenue.
++
++Revenue is order merchandise value, excludes tax/refunds and cancelled/deleted orders in current-state Gold. It is not a recognized accounting revenue measure. Gold is grouped by currency; Customer 360 has one row per customer/currency. A customer with no orders has a null currency and zero totals. Category average order value means category-attributed merchandise revenue divided by distinct orders in that category; category order counts are not additive.
++
++## 4. Sample complex JSON
++
++`sample_data/scenarios.json` contains 18 NDJSON lines, including one deliberately malformed line, two duplicates, five invalid records, late data, versions 1–3, cancellation, payment/shipment and customer CDC. Generate fresh timestamps with `python scripts/generate.py --output local_landing/orders`.
++
++A representative after-image is:
++
++```json
++{"event_id":"evt-1-ORDER_CREATED","event_type":"ORDER_CREATED","event_timestamp":"2026-09-06T10:00:00Z","cdc":{"entity":"order","operation":"INSERT","sequence_number":1,"before":null,"after":{"order":{"order_id":"ORD000001","order_status":"CONFIRMED","currency":"INR","created_at":"2026-09-06T10:00:00Z","items":[{"product_id":"P100","product_name":"Laptop","category":"Electronics","quantity":"2","unit_price":75000}]}}}}
++```
++
++This excerpt illustrates CDC shape; the complete fixtures also contain mandatory customer/source/metadata fields.
++
++## 5. Project structure
++
++| Path | Purpose |
++|---|---|
++| `src/pipeline.py` | Declarative table and flow registrations |
++| `src/retail/` | Schemas, configuration, pure Spark validation/transforms |
++| `resources/`, `databricks.yml` | Pipeline, jobs and deployment targets |
++| `scripts/` | Bootstrap, generator, replay, CDF consumer, acceptance |
++| `tests/` | Unit, medallion integration and real streaming recovery tests |
++| `sample_data/` | Deterministic failure/evolution/CDC fixtures |
++| `sql/` | Permissions, business assertions and monitoring queries |
++| `docs/` | Operational contracts, CI/CD and validation evidence |
++
++## 6. Unity Catalog design
++
++Separate catalogs `retail_dev`, `retail_test`, `retail_prod`; each has bronze, silver, gold and dq schemas. Managed volumes `bronze.landing` and `bronze.pipeline_state` hold source files and the diagnostic schema registry. Managed pipeline tables have pipeline-managed storage/checkpoints. An external volume may replace landing after a platform administrator creates a storage credential and external location with managed identity. Never store access keys in bundle YAML. Runtime identity owns pipeline outputs; producer can write landing; BI sees approved Gold views only. Raw/quarantine and Customer 360 contain PII and require governed access, retention and masking policies.
++
++## 7. Bronze implementation
++
++`raw_events` is append-only and reads `cloudFiles.format=text`, one JSON document per UTF-8 line. It stores raw_payload, ingestion and processing times, file path/modification time and extracted envelope fields. Text excludes line separators but does not reconstruct JSON. Pretty-printed multiline JSON is outside the source contract and will be quarantined line by line. Binary fidelity, if needed, requires a separate binary archive.
++
++`schema_probe` independently reads JSON using schemaLocation, schema hints, rescue evolution and `_rescued_data`. It is diagnostic, not a join source. Raw `rescued_data` denotes unparseable raw payload; probe `_rescued_data` is the actual Auto Loader unknown-field/type rescue. These have intentionally different meanings. This extra scan trades ingestion cost for both raw fidelity and schema-drift visibility.
++
++Bronze does not deduplicate business events: that would destroy the evidence needed to explain retransmission and recovery. Auto Loader file tracking prevents re-reading the same immutable file during ordinary restart.
++
++## 8. Data quality implementation
++
++`validation_rules()` defines event, customer, CDC, order, item, currency and payment rules. Numbers arrive as strings and are checked with try_cast; malformed types never crash ANSI-mode casts. Validation is event-wide: one invalid item quarantines the entire event. Null predicate results are failures. Expectations report violations without dropping rows; `invalid_events` stores the original payload, reasons and source file. `validated_events` retains both paths and supports reconciliation.
++
++Investigate using `sql/validation.sql`. Export selected quarantine rows, correct their source contract, and use `scripts/replay.py`. It creates a fresh event ID plus metadata.replay_of and preserves business event time. CDC corrections require an approved newer source sequence. Replay of very old analytics facts needs a controlled backfill into a separate recomputed target; a new ID does not bypass a watermark. Never replay valid order creations with new IDs casually: that can double-count business facts.
++
++## 9. Silver implementation
++
++Current customers/orders are AUTO CDC streaming tables. Customer addresses and current order items are materialized views over mutable snapshots so removal of an address/item does not leave stale children. `events`, `order_created_facts`, `order_item_events`, `payments`, `shipments` are append-only streaming datasets.
++
++from_json supplies the nested contract. posexplode gives item/address position within a snapshot; positions are not stable business line IDs across order edits. explode is appropriate when no index is needed; explode_outer retains an empty parent with a null child, unsuitable for item revenue counting. Higher-order forall validates arrays without exploding. Item and address arrays are never exploded together. A HOME address is selected with filter/try_element_at rather than assuming address index zero.
++
++## 10. CDC implementation
++
++`dp.create_auto_cdc_flow` handles source INSERT/UPDATE/DELETE and out-of-order arrival. Sequence ordering is `(sequence_number, event_timestamp, event_id, payload_hash)` for deterministic conflict resolution. Same sequence with differing payloads appears in `dq.cdc_conflicts`; alert and reconcile with source owner. The lexical tie-breaker ensures convergence, not business correctness of contradictory source events. Exact duplicate inputs share the same ordering tuple. Customer/order updates must be full after-images; explicit null clears a field (`ignore_null_updates=False`). Supporting sparse patches requires a distinct presence-aware contract.
++
++CDC bypasses event-time dedup to avoid losing old dimension updates. Seven-day tombstone retention assumes at most seven days of delayed CDC plus outages; increase it beyond the real source delay before production. Source sequence/timestamp consistency is a producer contract. If sequence and timestamp disagree, sequence wins and displayed effective timestamps may not be monotonic; investigate before using history as a temporal join dimension.
++
++Delta CDF is the downstream change log of Delta mutations, not the upstream business CDC envelope. Enabled on current tables, it includes `_change_type`, `_commit_version`, `_commit_timestamp`. `scripts/cdf_consumer.py` preserves all change types in a separate audit table. A current-state consumer must apply deletes and update postimages, not sum both update images. Starting version must still be retained. AUTO CDC avoids custom foreachBatch MERGE sequencing and tombstone code; MERGE is appropriate for a separately orchestrated imperative sink that needs custom transactional logic.
++
++## 11. SCD Type 1
++
++`silver.customers` has the latest row per customer. Fixtures create C001 in Bengaluru, deliver Hyderabad at sequence 105, retransmit it, deliver older Mumbai at 102, then delete at 110. The final current table has no C001. Orders use the same pattern and cancellation is a status update rather than deletion.
++
++## 12. SCD Type 2
++
++`silver.customer_history` tracks customer versions with AUTO CDC `__START_AT`/`__END_AT` ordering structs. `gold.customer_history` exposes effective timestamps, is_current, source_event_timestamp and ordinal record_version. C001 should have three closed historical versions after deletion. Deletes close history rather than create a visible DELETE version; the delete event remains in customer_changes. The ordinal can change when older history arrives; it is a display version, not a stable surrogate key. Use the full __START_AT struct for exact ordering/tie boundaries.
++
++## 13. Gold implementation
++
++Customer 360 joins current customers to current noncancelled order totals. Sales summary is date/hour/region/category/currency. Product performance includes units, revenue and distinct customers. These are materialized views, allowing updates/deletes to propagate. Refund/return accounting and exchange-rate conversion require additional contracts before financial reporting.
++
++## 14. Streaming aggregation
++
++Tumbling: 10 minutes. Sliding: 30 minutes every 5 minutes, up to six windows per event. Session: customer/currency with a 10-minute inactivity gap. All aggregate one row per deduplicated order creation, so item arrays do not inflate order count. Quantity is computed across each order's items before aggregation. Streaming tables emit finalized windows in append semantics once watermark permits; session windows can merge while open. `streaming_dashboard` is a provisional materialized aggregation and refreshes with pipeline updates for fresher BI consumption. It is explicitly not cancellation-adjusted; use sales_summary for current totals.
++
++## 15. Watermark and late data design
++
++30 minutes assumes online event arrival SLA of 30 minutes, to be validated from delay percentiles before production. Event time is source occurrence; ingestion time is observed processing arrival. Spark advances a watermark based on observed event time, not wall-clock age; idle streams may not finalize windows. Rows older than the watermark can be discarded by stateful analytics operators. Future timestamps beyond five minutes of ingestion are quarantined so a corrupt future event cannot arbitrarily advance state.
++
++`dropDuplicatesWithinWatermark([event_id])` bounds state by event-time progress (Spark 3.5+). Plain dropDuplicates(event_id) can retain unbounded state; dropDuplicates(event_id,event_timestamp) makes timestamp part of identity. Dedupe is bounded, not a forever uniqueness guarantee. Retransmissions must keep event_id and event_timestamp immutable. Long-horizon uniqueness and recovery use raw retention plus batch reconciliation. `late_events` reports arrival SLA violations, not the exact engine dropped-row count. Engine state metrics in the event log are authoritative for watermark drops. DQ audit and CDC preserve rows before analytics stateful operators.
++
++## 16. Checkpoint design
++
++Lakeflow owns pipeline checkpoints; do not start writeStream inside a decorated definition or pass a fake checkpoint option to readStream. Pipeline identity and flow names must remain stable across deploys. The schema probe has a stable per-environment registry in a UC Volume. The optional external CDF consumer explicitly uses a unique checkpoint such as `/Volumes/retail_prod/bronze/pipeline_state/cdf_orders_v1`.
++
++Offsets/file discovery, commit information and state-store data let a failed cluster resume committed progress. Transactional Delta sinks plus stable source/checkpoint identity support exactly-once processing of source positions, not arbitrary end-to-end business deduplication. Never delete state manually. A state schema change may require a new flow and isolated backfill rather than reusing incompatible checkpoints. Full refresh must be planned with complete source retention and downstream CDF consumers in mind.
++
++## 17. Schema evolution
++
++Versions 1, 2 (loyalty_tier), 3 (marketing_preferences) share an explicit nullable contract. New approved fields are added through code review. Unsupported versions quarantine until the contract is updated; raw data remains available. The probe uses `rescue` so unexpected fields do not silently change business tables. An alternative addNewColumns mode updates schema then stops on new columns, requiring a restart; do not combine it with an explicit full input schema. Type widening is runtime-dependent and intentionally not relied on here. Nested unknown fields always remain in raw_payload, even if the fixed parser ignores them.
++
++## 18. Performance optimization
++
++Serverless and Photon are configured. Avoid partitioning tiny tables or high-cardinality customer/order keys. Profile table size, predicate selectivity and platform support before enabling liquid clustering on order/customer IDs; do not combine legacy partitioning with liquid clustering. Let managed pipeline compaction manage small files; use OPTIMIZE only according to platform-managed table support and observed file stats.
++
++The 30-second trigger trades freshness against scheduling cost. Tune maximum files and watermark using backlog/state metrics. Sliding windows multiply state; session skew can concentrate large customers. Pre-aggregation avoids item-level order-count shuffles. Do not salt keys without a second-stage exact reconciliation design. Batch dimension joins may use automatic broadcast when small; never force broadcast of unbounded customer data. Full-history duplicate audits and Gold views can become expensive at scale: measure incremental refresh plans, introduce date-bounded operational views plus scheduled full reconciliation where justified. No throughput claim is made without a representative load test.
++
++## 19. Observability
++
++DQ tables expose processed/rejected counts, arrival delay, late-by-SLA, duplicate copies, CDC operation counts and conflicts. Published `dq.pipeline_event_log` provides flow progress, failures and runtime rate/state metrics. `sql/validation.sql` keeps raw event details because nested metric field availability differs by runtime. Wire SQL alerts for nonzero conflicts, rejection rate >1% over your agreed window, growing backlog and failed updates; route to an approved incident channel. DQ arrival delay is not processing latency. Measure processing latency/update duration, input/output rate, watermark drops and state size from runtime logs; do not substitute zeros for unavailable metrics.
++
++## 20. Testing
++
++```bash
++python -m pip install -e '.[test]'
++python -m pytest -q
++python -m ruff check .
++```
++
++Local Spark tests exercise JSON/numeric parsing, five quarantine scenarios, schema evolution, array cardinality, CDC source preparation, Gold arithmetic and a real file stream across checkpointed restarts, duplicates and late data. Databricks engine-only AUTO CDC, Auto Loader, expectations and managed materialized views require `scripts/acceptance.py` in an isolated test catalog. Run the pipeline once, run acceptance, restart without changing landing files, then run acceptance again. Local tests deliberately do not pretend to execute Databricks services.
++
++## 21. Sample data generator
++
++```bash
++python scripts/generate.py --output local_landing/orders --batches 1
++python scripts/generate.py --output /Volumes/retail_dev/bronze/landing/orders --batches 0 --interval 5
++```
++
++The second command runs on Databricks compute with volume write access. Each immutable NDJSON file is completed outside the watched directory then moved in. Single-writer fixture sequencing is deterministic; synthetic continued batches use time-based keys. This is a load/example producer, not a replacement for source-database log sequence numbers. Fixture customer deletion and order cancellation are deliberate.
++
++## 22. Databricks Asset Bundle
++
++`databricks.yml` defines dev/test/prod and includes pipeline/job resources. Uses current Lakeflow `pyspark.pipelines`, `@dp.table`, `@dp.materialized_view`, `@dp.expect_all`, `create_streaming_table`, `create_auto_cdc_flow`. AUTO CDC and expectations are Databricks additions, not guaranteed in open-source Spark. New default publishing mode with `schema` and fully qualified names is required; legacy LIVE-mode pipelines need migration. Advanced/serverless availability depends on workspace/cloud/entitlement. Validate the bundle against the workspace's supported CLI schema before deploy. Production is continuous; dev/test are triggered. Host and credentials come from CLI profile/environment, not source code.
++
++## 23. CI/CD
++
++Repository workflows run Python/Spark tests and lint on pull requests. A separate manually triggered deployment workflow uses a protected GitHub Environment per target, OAuth service-principal credentials from environment secrets, bundle validation and deploy. Configure mandatory reviewers for prod in GitHub settings; YAML alone cannot enforce approval. The deployment workflow validates/tests again before deployment. DEV → isolated TEST + runtime acceptance → approved PROD is the release policy; no untested commit should be promoted. See docs/operations.md for rollback and gates.
++
++## 24. Deployment instructions
++
++1. Install a current Databricks CLI and authenticate to your actual workspace (`databricks auth login --host https://<workspace-host>`). For CI use OAuth M2M credentials from protected environment secrets.
++2. Import/run scripts/bootstrap.py with the chosen catalog; grant runtime/producer permissions using sql/security.sql.
++3. Generate a fresh sample batch locally. Upload its completed files using `databricks fs cp --recursive local_landing/orders dbfs:/Volumes/retail_dev/bronze/landing/orders`.
++4. From this project directory run `databricks bundle validate -t dev --var service_principal=<application-id>` then `databricks bundle deploy -t dev --var service_principal=<application-id>`.
++5. Start a triggered update with `databricks bundle run -t dev refresh --var service_principal=<application-id>`.
++6. Query Bronze/DQ/Silver/Gold with sql/validation.sql; wait for all flows to complete. Final streaming windows may be absent until later event-time data advances the watermark.
++7. Repeat in a clean retail_test catalog using only one scenarios batch; run `databricks bundle run -t test acceptance --var service_principal=<application-id>`. Restart refresh and run acceptance again.
++8. Promote the identical reviewed commit to prod after runtime, security and load gates. Deploy prod then start its pipeline update from the Pipelines UI or `databricks pipelines start-update <pipeline-id>`. Do not schedule overlapping triggered refresh jobs for the continuous prod pipeline.
++
++The provided Jobs acceptance notebook requires a workspace supporting serverless notebook tasks; attach an approved job cluster if unsupported. This environment has no Databricks workspace credentials, so deployment and Databricks acceptance are not claimed as executed.
++
++## 25. Validation SQL
++
++See sql/validation.sql and scripts/acceptance.py for executable queries/assertions. Isolated fixture expectations: raw 18, quarantine 5, C001 absent from current customers, three closed history versions, ORD000001 cancelled, no current items for that order, old order ORD000006 still reaches CDC. Late analytics counts may depend on microbatch ordering and are not hard-coded.
++
++## 26. Troubleshooting guide
++
++| Symptom | Action |
++|---|---|
++| No raw rows | Check UC READ VOLUME, complete immutable files, source path and pipeline event log |
++| All records quarantined | Inspect rejection_reasons, event version and complete CDC after-images |
++| No finalized windows | Check watermark/event-time progress; use provisional dashboard |
++| Stale deleted customer | Inspect source sequence, before key and tombstone horizon |
++| Conflicting CDC | Investigate dq.cdc_conflicts; publish source-authorized higher sequence correction |
++| Restart fails on state | Restore compatible code; migrate/backfill a new flow, never delete checkpoints casually |
++| CDF starting version missing | Re-snapshot and establish a new checkpoint/version boundary |
++| Bundle schema/API error | Validate CLI/workspace support for current publishing and AUTO CDC |
++
++## 27. Senior-level interview explanation
++
++I preserve a lossless business audit trail before quality filtering. Analytics deduplication is bounded by event-time SLA, while source-ordered CDC is independent so late updates do not silently corrupt current state. I distinguish mutable business totals from immutable event metrics and use materialized views for corrections. I keep array grains separate, group money by currency, and treat runtime acceptance, permissions, recovery and measured capacity as release requirements rather than asserting that valid Python is production certification.
++
++## 28. Interview questions and answers
++
++1. Why raw text Bronze? It preserves malformed payloads and exact JSON text for replay; a parsed diagnostic source handles schema rescue separately.
++2. Why no watermark on CDC? Old business updates still need sequence-aware processing, especially historical dimensions.
++3. Why AUTO CDC rather than foreachBatch MERGE? It supplies ordered change application and SCD history; custom MERGE requires implementing and testing those semantics.
++4. Does exactly-once mean no duplicates? No. File/transaction progress and business event identity are separate concerns.
++5. Why materialized child tables? Current snapshots replace arrays; append-only explosion would leave removed items/addresses behind.
++6. What closes a streaming window? Event-time watermark progress, not the wall clock alone.
++7. How are duplicates older than retention handled? Keep raw evidence and reconcile/backfill; bounded streaming state is not a permanent identity store.
++8. Is CDF the same as source CDC? No. CDF records Delta mutations; source CDC expresses business changes and source ordering.
++9. Why track currency? Summing amounts from different currencies creates meaningless totals without governed conversion rates.
++10. How do you deploy a state-breaking change? Use an isolated target/backfill and reconciliation before cutover; preserve old checkpoints for rollback.
++11. What is the primary schema-evolution risk? Silently accepting incompatible business meaning, even when a parser can coerce the type.
++12. How would Kafka fit? Replace Bronze source with Kafka key/value/topic/partition/offset ingestion; retain the same downstream event contract and source-position audit.
++
++## 29. Production readiness checklist
++
++- [ ] Workspace validates current bundle schema, publishing mode, serverless and Advanced features.
++- [ ] Isolated Databricks fixture and restart acceptance passes.
++- [ ] Source ordering, timestamp consistency, event identity and full-image contracts are enforced upstream.
++- [ ] Measured lateness/outage SLA fits watermark and tombstone retention.
++- [ ] Representative throughput, skew, state growth and cost tests pass.
++- [ ] UC permissions, PII retention/masking and service-principal ownership are reviewed.
++- [ ] Conflict/rejection/backlog alerts and on-call ownership are configured.
++- [ ] Raw/CDF retention, restore procedure and backfill reconciliation are rehearsed.
++- [ ] Protected deployment environments require production approval.
++- [ ] Workspace host, identities and environment variables are supplied securely.
++
++### Verified API references
++
++Official documentation consulted for current API choices:
++- [Lakeflow Python API](https://docs.databricks.com/aws/en/ldp/developer/python-ref)
++- [AUTO CDC function and sequencing](https://docs.databricks.com/aws/en/ldp/developer/ldp-python-ref-apply-changes)
++- [Auto Loader schema and rescue modes](https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema)
++- [Default publishing mode](https://docs.databricks.com/aws/en/ldp/migrate-to-dpm)
++- [Bundle resources](https://docs.databricks.com/aws/en/dev-tools/bundles/resources)
++
++The code avoids preview bitemporal/type-widening features. Revalidate workspace-specific behavior before production deployment.
+diff --git a/projects/databricks-streaming-pipeline/databricks.yml b/projects/databricks-streaming-pipeline/databricks.yml
+new file mode 100644
+index 0000000..8f4a041
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/databricks.yml
+@@ -0,0 +1,42 @@
++bundle:
++  name: retail-streaming
++include:
++  - resources/*.yml
++variables:
++  catalog:
++    default: retail_dev
++  pipeline_schema:
++    default: silver
++  source_path:
++    default: /Volumes/${var.catalog}/bronze/landing/orders
++  schema_location:
++    default: /Volumes/${var.catalog}/bronze/pipeline_state/schema_probe
++  watermark:
++    default: 30 minutes
++  lateness_seconds:
++    default: "1800"
++  trigger_interval:
++    default: 30 seconds
++  service_principal:
++    description: Application ID of the deployment/runtime service principal
++  continuous:
++    type: complex
++    default: false
++targets:
++  dev:
++    default: true
++    mode: development
++    variables:
++      catalog: retail_dev
++  test:
++    variables:
++      catalog: retail_test
++  prod:
++    mode: production
++    workspace:
++      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
++    variables:
++      catalog: retail_prod
++      continuous: true
++    run_as:
++      service_principal_name: ${var.service_principal}
+diff --git a/projects/databricks-streaming-pipeline/docs/operations.md b/projects/databricks-streaming-pipeline/docs/operations.md
+new file mode 100644
+index 0000000..521b26e
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/docs/operations.md
+@@ -0,0 +1,21 @@
++# Operational gates and recovery
++
++## Release
++
++Use a reviewed commit and passing local CI. Deploy DEV, generate fresh fixture data, inspect quarantine. TEST must use an isolated catalog and a single fixture batch; run acceptance, restart unchanged source, run acceptance again. Then run representative volume/skew/outage tests with agreed freshness and cost budgets. Capture Databricks update IDs and results with the release. Configure GitHub protected environment reviewers and environment-scoped OAuth secrets before enabling production deployment.
++
++## Rollback
++
++Redeploy the previous reviewed commit without deleting the pipeline, checkpoints or landing files. If state/table schemas changed incompatibly, stop the update, restore the compatible version and plan an isolated rebuild/cutover. Code rollback does not roll back already-applied data mutations. Publish compensating source CDC with higher sequences for incorrect business updates, or use a reconciled backfill into new targets. Preserve raw, quarantine and event logs throughout.
++
++## Source and retention
++
++One NDJSON event per line. Files immutable after publication. Each event ID identifies exactly one payload and original event timestamp. Each source entity/key has a monotonic sequence, consistent business timestamp and a full after-image. Delete before-images retain keys. Raw retention must exceed replay requirements; Delta CDF retention must exceed consumer outages. Seven-day tombstones are an explicit example SLA, not an unlimited late-update guarantee.
++
++## Metrics
++
++Business audit tables measure records, rejection, duplicate identity and arrival delay. Pipeline runtime logs measure processing progress, duration, throughput and state/watermark drops. Alert on the actual metric available in the deployed runtime; never relabel arrival delay as processing latency. Protect raw event logs and quarantine because they contain customer PII. Grant monitoring readers only the required schema/view access.
++
++## Identity conflicts
++
++AUTO CDC converges deterministically by sequence, timestamp, event ID and payload hash. dq.cdc_conflicts detects disagreement at a source sequence; quarantine invalid structure before CDC, but do not claim semantic conflicts were withheld from AUTO CDC. A conflict requires investigation and a higher-sequence source correction. For a strict fail-closed source, add a durable upstream sequencer/contract validator before this pipeline.
+diff --git a/projects/databricks-streaming-pipeline/docs/validation-results.md b/projects/databricks-streaming-pipeline/docs/validation-results.md
+new file mode 100644
+index 0000000..a1e5ac8
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/docs/validation-results.md
+@@ -0,0 +1,26 @@
++# Validation evidence
++
++Validated locally on 2026-09-06 with Python 3.12 and Apache Spark 4.0.1.
++
++- `python -m pytest tests -q --disable-warnings --maxfail=1`: **10 passed in 15.72 seconds**.
++- `python -m ruff check .`: **All checks passed**.
++- `python -m compileall -q src scripts tests`: passed.
++- Bundle and pipeline/job YAML: parsed successfully with PyYAML (syntax check only).
++
++Test coverage includes nested JSON and decimal coercion, malformed/null/invalid envelopes,
++email/country/quantity validation, schema v2/v3, CDC before/after source projections,
++array row cardinality, exact Gold arithmetic, and an actual file-based Structured
++Streaming query across duplicates, watermark advancement, late arrivals, and repeated
++checkpointed restarts.
++
++An initial run hit an environment Python-worker daemon startup failure. Test inputs
++were changed to JVM-native literal frames; production transforms were unchanged.
++
++Not executed: Databricks bundle validate/deploy, Auto Loader, AUTO CDC engine,
++managed expectations/materialized views, Unity Catalog grants, cloud-scale capacity,
++or Databricks fixture acceptance. These require the intended workspace and identity.
++`scripts/acceptance.py` and README release gates describe those checks explicitly.
++
++GitHub API access check reports `pull=true`, `push=false`, `admin=false` for the
++connected account on VreddyChittepu/modern-data-engineering. No remote changes are
++claimed. Implementation is prepared as a local Git commit and downloadable patch.
+diff --git a/projects/databricks-streaming-pipeline/pyproject.toml b/projects/databricks-streaming-pipeline/pyproject.toml
+new file mode 100644
+index 0000000..66948fa
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/pyproject.toml
+@@ -0,0 +1,23 @@
++[build-system]
++requires = ["setuptools>=69"]
++build-backend = "setuptools.build_meta"
++[project]
++name = "retail-streaming-pipeline"
++version = "0.1.0"
++requires-python = ">=3.11"
++dependencies = []
++[project.optional-dependencies]
++test = ["pyspark==4.0.1", "pytest>=8,<9", "PyYAML>=6,<7", "ruff>=0.11,<1"]
++[tool.setuptools.packages.find]
++where = ["src"]
++[tool.pytest.ini_options]
++pythonpath = ["src", "."]
++testpaths = ["tests"]
++markers = ["streaming: real local Structured Streaming", "databricks: requires deployed Databricks tables"]
++[tool.ruff]
++line-length = 110
++[tool.ruff.lint]
++select = ["E9", "F63", "F7", "F82"]
++[tool.ruff.lint.per-file-ignores]
++"scripts/bootstrap.py" = ["F821"]
++"scripts/acceptance.py" = ["F821"]
+diff --git a/projects/databricks-streaming-pipeline/resources/jobs.yml b/projects/databricks-streaming-pipeline/resources/jobs.yml
+new file mode 100644
+index 0000000..266d0ed
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/resources/jobs.yml
+@@ -0,0 +1,20 @@
++resources:
++  jobs:
++    refresh:
++      name: retail-refresh-${bundle.target}
++      max_concurrent_runs: 1
++      tasks:
++        - task_key: pipeline
++          pipeline_task:
++            pipeline_id: ${resources.pipelines.retail.id}
++            full_refresh: false
++          max_retries: 2
++          min_retry_interval_millis: 60000
++    acceptance:
++      name: retail-acceptance-${bundle.target}
++      tasks:
++        - task_key: assertions
++          notebook_task:
++            notebook_path: ../scripts/acceptance.py
++            base_parameters:
++              catalog: ${var.catalog}
+diff --git a/projects/databricks-streaming-pipeline/resources/pipeline.yml b/projects/databricks-streaming-pipeline/resources/pipeline.yml
+new file mode 100644
+index 0000000..3a92b8d
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/resources/pipeline.yml
+@@ -0,0 +1,27 @@
++resources:
++  pipelines:
++    retail:
++      name: retail-streaming-${bundle.target}
++      catalog: ${var.catalog}
++      schema: ${var.pipeline_schema}
++      serverless: true
++      photon: true
++      channel: CURRENT
++      edition: ADVANCED
++      continuous: ${var.continuous}
++      libraries:
++        - file:
++            path: ../src/pipeline.py
++      configuration:
++        retail.catalog: ${var.catalog}
++        retail.source_path: ${var.source_path}
++        retail.schema_location: ${var.schema_location}
++        retail.watermark: ${var.watermark}
++        retail.lateness_seconds: ${var.lateness_seconds}
++        retail.tombstone_seconds: "604800"
++        pipelines.trigger.interval: ${var.trigger_interval}
++        spark.sql.session.timeZone: UTC
++      event_log:
++        name: pipeline_event_log
++        catalog: ${var.catalog}
++        schema: dq
+diff --git a/projects/databricks-streaming-pipeline/sample_data/scenarios.json b/projects/databricks-streaming-pipeline/sample_data/scenarios.json
+new file mode 100644
+index 0000000..4461a61
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/sample_data/scenarios.json
+@@ -0,0 +1,18 @@
++{"event_id": "evt-1-ORDER_CREATED", "event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-1"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 1, "before": null, "after": {"order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-1-ORDER_CREATED", "event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-1"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 1, "before": null, "after": {"order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-1-CUSTOMER_CREATED", "event_type": "CUSTOMER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-1"}, "cdc": {"entity": "customer", "operation": "INSERT", "sequence_number": 1, "before": null, "after": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}}}
++{"event_id": "customer-update-105", "event_type": "CUSTOMER_UPDATED", "event_timestamp": "2026-09-06T10:00:01+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-1"}, "cdc": {"entity": "customer", "operation": "UPDATE", "sequence_number": 105, "before": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}, "after": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Hyderabad", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}}}
++{"event_id": "customer-update-105", "event_type": "CUSTOMER_UPDATED", "event_timestamp": "2026-09-06T10:00:01+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-1"}, "cdc": {"entity": "customer", "operation": "UPDATE", "sequence_number": 105, "before": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}, "after": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Hyderabad", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}}}
++{"event_id": "customer-update-102", "event_type": "CUSTOMER_UPDATED", "event_timestamp": "2026-09-06T10:00:00.500000+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-1"}, "cdc": {"entity": "customer", "operation": "UPDATE", "sequence_number": 102, "before": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}, "after": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Mumbai", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}}}
++{"event_id": "customer-delete-110", "event_type": "CUSTOMER_DELETED", "event_timestamp": "2026-09-06T10:00:02+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY1", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK1", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-1"}, "cdc": {"entity": "customer", "operation": "DELETE", "sequence_number": 110, "before": {"customer": {"customer_id": "C001", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi1@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Hyderabad", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}}, "after": null}}
++{"event_id": "evt-2-ORDER_CREATED", "event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C002", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi2@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000002", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY2", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK2", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-2"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 2, "before": null, "after": {"order": {"order_id": "ORD000002", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "bad", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY2", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK2", "estimated_delivery": "2026-09-10"}}}}}
++{"event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C003", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi3@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000003", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY3", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK3", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-3"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 3, "before": null, "after": {"order": {"order_id": "ORD000003", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY3", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK3", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-4-ORDER_CREATED", "event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C004", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": null, "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000004", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY4", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK4", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-4"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 4, "before": null, "after": {"order": {"order_id": "ORD000004", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY4", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK4", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-5-ORDER_CREATED", "event_type": "UNKNOWN", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C005", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi5@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000005", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY5", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK5", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-5"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 5, "before": null, "after": {"order": {"order_id": "ORD000005", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY5", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK5", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-6-ORDER_CREATED", "event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T08:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C006", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi6@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000006", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T08:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY6", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK6", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-6"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 6, "before": null, "after": {"order": {"order_id": "ORD000006", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T08:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY6", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK6", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-7-ORDER_CANCELLED", "event_type": "ORDER_CANCELLED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C007", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi7@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000001", "order_status": "CANCELLED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY7", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK7", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-7"}, "cdc": {"entity": "order", "operation": "UPDATE", "sequence_number": 7, "before": {"order": {"order_id": "ORD000007", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY7", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK7", "estimated_delivery": "2026-09-10"}}}, "after": {"order": {"order_id": "ORD000001", "order_status": "CANCELLED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY7", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK7", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-8-ORDER_CREATED", "event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C008", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi8@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}], "loyalty_tier": "GOLD"}, "order": {"order_id": "ORD000008", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY8", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK8", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "2.0", "ingestion_source": "autoloader", "correlation_id": "corr-8"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 8, "before": null, "after": {"order": {"order_id": "ORD000008", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY8", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK8", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-9-ORDER_CREATED", "event_type": "ORDER_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C009", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi9@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}], "loyalty_tier": "GOLD", "marketing_preferences": {"email": true, "sms": false}}, "order": {"order_id": "ORD000009", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY9", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK9", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "3.0", "ingestion_source": "autoloader", "correlation_id": "corr-9"}, "cdc": {"entity": "order", "operation": "INSERT", "sequence_number": 9, "before": null, "after": {"order": {"order_id": "ORD000009", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY9", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK9", "estimated_delivery": "2026-09-10"}}}}}
++{"event_id": "evt-10-PAYMENT_COMPLETED", "event_type": "PAYMENT_COMPLETED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C010", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi10@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000010", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY10", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK10", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-10"}}
++{"event_id": "evt-11-SHIPMENT_CREATED", "event_type": "SHIPMENT_CREATED", "event_timestamp": "2026-09-06T10:00:00+00:00", "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": {"customer_id": "C011", "name": {"first_name": "Ravi", "last_name": "Kumar"}, "email": "ravi11@example.com", "phone": null, "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"}, {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}, "order": {"order_id": "ORD000011", "order_status": "CONFIRMED", "currency": "INR", "created_at": "2026-09-06T10:00:00+00:00", "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000}, {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}], "payment": {"payment_id": "PAY11", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500}, "shipping": {"carrier": "DHL", "tracking_id": "TRK11", "estimated_delivery": "2026-09-10"}}, "metadata": {"schema_version": "1.0", "ingestion_source": "autoloader", "correlation_id": "corr-11"}}
++{"event_id": BROKEN
+diff --git a/projects/databricks-streaming-pipeline/scripts/__init__.py b/projects/databricks-streaming-pipeline/scripts/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/projects/databricks-streaming-pipeline/scripts/acceptance.py b/projects/databricks-streaming-pipeline/scripts/acceptance.py
+new file mode 100644
+index 0000000..ac02188
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/scripts/acceptance.py
+@@ -0,0 +1,20 @@
++# Databricks notebook source
++# Execute after an isolated test-catalog run with sample_data/scenarios.json only.
++import re
++
++dbutils.widgets.text("catalog", "retail_test")
++c = dbutils.widgets.get("catalog")
++assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c)
++def scalar(query):
++    return spark.sql(query).first()[0]
++assert scalar(f"SELECT count(*) FROM {c}.bronze.raw_events") == 18
++assert scalar(f"SELECT count(*) FROM {c}.dq.invalid_events") == 5
++assert scalar(f"SELECT count(*) FROM {c}.silver.customers WHERE customer_id='C001'") == 0
++assert scalar(f"SELECT count(*) FROM {c}.silver.customer_history WHERE customer_id='C001'") == 3
++assert scalar(f"SELECT count(*) FROM {c}.silver.orders WHERE order_id='ORD000001' AND order_status='CANCELLED'") == 1
++assert scalar(f"SELECT count(*) FROM {c}.silver.order_items WHERE order_id='ORD000001'") == 0
++assert scalar(f"SELECT count(*) FROM {c}.silver.orders WHERE order_id='ORD000009'") == 1
++assert scalar(f"SELECT count(*) FROM {c}.silver.orders WHERE order_id='ORD000006'") == 1
++assert scalar(f"SELECT count(*) FROM {c}.gold.sales_summary WHERE gross_revenue < 0") == 0
++# Restart pipeline without changing files; re-run to verify Bronze count remains 18.
++print("Databricks acceptance assertions passed")
+diff --git a/projects/databricks-streaming-pipeline/scripts/bootstrap.py b/projects/databricks-streaming-pipeline/scripts/bootstrap.py
+new file mode 100644
+index 0000000..ca56ea6
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/scripts/bootstrap.py
+@@ -0,0 +1,13 @@
++# Databricks notebook source
++# Run as a provisioning principal; grant runtime principal access afterward (sql/security.sql).
++import re
++
++dbutils.widgets.text("catalog", "retail_dev")
++catalog = dbutils.widgets.get("catalog")
++assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog)
++spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
++for schema in ("bronze", "silver", "gold", "dq"):
++    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
++for volume in ("landing", "pipeline_state"):
++    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.bronze.{volume}")
++dbutils.fs.mkdirs(f"/Volumes/{catalog}/bronze/landing/orders")
+diff --git a/projects/databricks-streaming-pipeline/scripts/cdf_consumer.py b/projects/databricks-streaming-pipeline/scripts/cdf_consumer.py
+new file mode 100644
+index 0000000..5d7f59e
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/scripts/cdf_consumer.py
+@@ -0,0 +1,17 @@
++"""Optional external CDF audit sink; run as a separate Spark job, never inside dp definitions."""
++import argparse
++from pyspark.sql import SparkSession
++
++if __name__ == "__main__":
++    p = argparse.ArgumentParser()
++    p.add_argument("--source-table", required=True)
++    p.add_argument("--target-table", required=True)
++    p.add_argument("--checkpoint", required=True, help="Stable unique UC Volume path")
++    p.add_argument("--starting-version", type=int, required=True)
++    a = p.parse_args()
++    spark = SparkSession.builder.getOrCreate()
++    query = (spark.readStream.format("delta").option("readChangeFeed", "true")
++        .option("startingVersion", a.starting_version).table(a.source_table)
++        .writeStream.format("delta").outputMode("append")
++        .option("checkpointLocation", a.checkpoint).trigger(availableNow=True).toTable(a.target_table))
++    query.awaitTermination()
+diff --git a/projects/databricks-streaming-pipeline/scripts/generate.py b/projects/databricks-streaming-pipeline/scripts/generate.py
+new file mode 100644
+index 0000000..90ed6cb
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/scripts/generate.py
+@@ -0,0 +1,106 @@
++"""NDJSON generator. Local paths or /Volumes paths on Databricks; no cloud credentials needed."""
++import argparse
++import copy
++import json
++import random
++import time
++import uuid
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++
++
++def event(number=1, now=None, event_type="ORDER_CREATED", version="1.0"):
++    now = now or datetime.now(timezone.utc)
++    customer = {"customer_id": f"C{number % 20:03}", "name": {"first_name": "Ravi", "last_name": "Kumar"},
++        "email": f"ravi{number % 20}@example.com", "phone": None,
++        "addresses": [{"address_type": "HOME", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560001"},
++                      {"address_type": "WORK", "city": "Bengaluru", "state": "Karnataka", "country": "India", "postal_code": "560002"}]}
++    if version in ("2.0", "3.0"):
++        customer["loyalty_tier"] = "GOLD"
++    if version == "3.0":
++        customer["marketing_preferences"] = {"email": True, "sms": False}
++    order = {"order_id": f"ORD{number:06}", "order_status": "CONFIRMED", "currency": "INR", "created_at": now.isoformat(),
++        "items": [{"product_id": "P100", "product_name": "Laptop", "category": "Electronics", "quantity": "2", "unit_price": 75000},
++                  {"product_id": "P200", "product_name": "Mouse", "category": "Accessories", "quantity": 1, "unit_price": "1500.00"}],
++        "payment": {"payment_id": f"PAY{number}", "payment_method": "UPI", "payment_status": "SUCCESS", "amount": 151500},
++        "shipping": {"carrier": "DHL", "tracking_id": f"TRK{number}", "estimated_delivery": (now + timedelta(days=4)).date().isoformat()}}
++    data = {"event_id": f"evt-{number}-{event_type}", "event_type": event_type, "event_timestamp": now.isoformat(),
++        "source": {"system": "ecommerce", "region": "IN", "application": "web"}, "customer": customer, "order": order,
++        "metadata": {"schema_version": version, "ingestion_source": "autoloader", "correlation_id": f"corr-{number}"}}
++    if event_type.startswith(("CUSTOMER_", "ORDER_")):
++        entity = "customer" if event_type.startswith("CUSTOMER_") else "order"
++        operation = "INSERT" if event_type.endswith("CREATED") else "DELETE" if event_type.endswith("DELETED") else "UPDATE"
++        data["cdc"] = {"entity": entity, "operation": operation, "sequence_number": number,
++            "before": {entity: copy.deepcopy(data[entity])} if operation != "INSERT" else None,
++            "after": {entity: copy.deepcopy(data[entity])} if operation != "DELETE" else None}
++    return data
++
++
++def scenarios(now=None):
++    """Deterministic expected data: 151500 INR/order, customer C001 moves and is deleted."""
++    now = now or datetime.now(timezone.utc)
++    created = event(1, now)
++    customer = event(1, now, "CUSTOMER_CREATED")
++    updated = copy.deepcopy(customer)
++    updated.update(event_id="customer-update-105", event_type="CUSTOMER_UPDATED", event_timestamp=(now+timedelta(seconds=1)).isoformat())
++    updated["cdc"].update(operation="UPDATE", sequence_number=105, before=copy.deepcopy(customer["cdc"]["after"]))
++    updated["cdc"]["after"]["customer"]["addresses"][0]["city"] = "Hyderabad"
++    old = copy.deepcopy(updated)
++    old["event_id"] = "customer-update-102"
++    old["event_timestamp"] = (now+timedelta(milliseconds=500)).isoformat()
++    old["cdc"]["sequence_number"] = 102
++    old["cdc"]["after"]["customer"]["addresses"][0]["city"] = "Mumbai"
++    deleted = copy.deepcopy(updated)
++    deleted.update(event_id="customer-delete-110", event_type="CUSTOMER_DELETED", event_timestamp=(now+timedelta(seconds=2)).isoformat())
++    deleted["cdc"].update(operation="DELETE", sequence_number=110, before=copy.deepcopy(updated["cdc"]["after"]), after=None)
++    invalid = event(2, now)
++    invalid["cdc"]["after"]["order"]["items"][0]["quantity"] = "bad"
++    missing = event(3, now); missing.pop("event_id")
++    null_email = event(4, now); null_email["customer"]["email"] = None
++    bad_type = event(5, now); bad_type["event_type"] = "UNKNOWN"
++    late = event(6, now-timedelta(hours=2))
++    cancel = event(7, now, "ORDER_CANCELLED")
++    cancel["order"]["order_id"] = "ORD000001"
++    cancel["order"]["created_at"] = now.isoformat()
++    cancel["order"]["order_status"] = "CANCELLED"
++    cancel["cdc"]["after"]["order"] = copy.deepcopy(cancel["order"])
++    return [created, copy.deepcopy(created), customer, updated, copy.deepcopy(updated), old, deleted,
++        invalid, missing, null_email, bad_type, late, cancel,
++        event(8, now, version="2.0"), event(9, now, version="3.0"),
++        event(10, now, "PAYMENT_COMPLETED"), event(11, now, "SHIPMENT_CREATED"), '{"event_id": BROKEN']
++
++
++def publish(directory, records):
++    directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
++    # Write complete immutable files, stage outside the watched directory, then rename.
++    name = f"batch-{uuid.uuid4().hex}.json"
++    staging = directory.parent / f".{name}.tmp"
++    staging.write_text("\n".join(r if isinstance(r, str) else json.dumps(r) for r in records) + "\n")
++    staging.replace(directory / name)
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--output", required=True)
++    parser.add_argument("--batches", type=int, default=1, help="0 runs continuously")
++    parser.add_argument("--interval", type=float, default=5)
++    parser.add_argument("--seed", type=int, default=42)
++    args = parser.parse_args()
++    rng = random.Random(args.seed)
++    batch = 0
++    while args.batches == 0 or batch < args.batches:
++        if batch == 0:
++            records = scenarios()
++        else:
++            # Fresh monotonic sequence and unique order keys on every batch.
++            base = time.time_ns()
++            records = [event(base+i, event_type=rng.choice(["ORDER_CREATED", "CUSTOMER_CREATED", "CUSTOMER_UPDATED", "CUSTOMER_DELETED", "ORDER_UPDATED", "ORDER_CANCELLED", "PAYMENT_COMPLETED", "SHIPMENT_CREATED"]), version=rng.choice(["1.0","2.0","3.0"])) for i in range(10)]
++            records.append(copy.deepcopy(records[0]))
++            records.append(event(base+11, datetime.now(timezone.utc)-timedelta(hours=2)))
++            records.append('{"broken":')
++        publish(args.output, records)
++        batch += 1
++        if args.batches == 0 or batch < args.batches:
++            time.sleep(args.interval)
++if __name__ == "__main__":
++    main()
+diff --git a/projects/databricks-streaming-pipeline/scripts/replay.py b/projects/databricks-streaming-pipeline/scripts/replay.py
+new file mode 100644
+index 0000000..a7b3048
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/scripts/replay.py
+@@ -0,0 +1,23 @@
++"""Replay operator-corrected NDJSON with new IDs and links to original IDs.
++Export only investigated quarantine rows, correct them, then pass the corrected file.
++For CDC corrections increase source sequence after source-owner approval.
++"""
++import argparse
++import json
++import uuid
++from pathlib import Path
++from generate import publish
++
++if __name__ == "__main__":
++    p = argparse.ArgumentParser()
++    p.add_argument("--corrected-file", required=True)
++    p.add_argument("--output", required=True)
++    a = p.parse_args()
++    records = []
++    for line in Path(a.corrected_file).read_text().splitlines():
++        record = json.loads(line)
++        old_id = record["event_id"]
++        record["event_id"] = "replay-" + uuid.uuid4().hex
++        record.setdefault("metadata", {})["replay_of"] = old_id
++        records.append(record)
++    publish(a.output, records)
+diff --git a/projects/databricks-streaming-pipeline/sql/security.sql b/projects/databricks-streaming-pipeline/sql/security.sql
+new file mode 100644
+index 0000000..fef4aa9
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/sql/security.sql
+@@ -0,0 +1,12 @@
++-- Replace identifiers before execution; provision separately from the runtime identity.
++GRANT USE CATALOG ON CATALOG retail_dev TO `<runtime-service-principal>`;
++GRANT USE SCHEMA, CREATE TABLE, CREATE MATERIALIZED VIEW ON SCHEMA retail_dev.bronze TO `<runtime-service-principal>`;
++GRANT USE SCHEMA, CREATE TABLE, CREATE MATERIALIZED VIEW ON SCHEMA retail_dev.silver TO `<runtime-service-principal>`;
++GRANT USE SCHEMA, CREATE TABLE, CREATE MATERIALIZED VIEW ON SCHEMA retail_dev.gold TO `<runtime-service-principal>`;
++GRANT USE SCHEMA, CREATE TABLE, CREATE MATERIALIZED VIEW ON SCHEMA retail_dev.dq TO `<runtime-service-principal>`;
++GRANT READ VOLUME ON VOLUME retail_dev.bronze.landing TO `<runtime-service-principal>`;
++GRANT READ VOLUME, WRITE VOLUME ON VOLUME retail_dev.bronze.pipeline_state TO `<runtime-service-principal>`;
++GRANT USE CATALOG ON CATALOG retail_dev TO `<producer-service-principal>`;
++GRANT USE SCHEMA ON SCHEMA retail_dev.bronze TO `<producer-service-principal>`;
++GRANT WRITE VOLUME, READ VOLUME ON VOLUME retail_dev.bronze.landing TO `<producer-service-principal>`;
++-- Give BI principals SELECT on approved Gold views only; raw/quarantine contain PII.
+diff --git a/projects/databricks-streaming-pipeline/sql/validation.sql b/projects/databricks-streaming-pipeline/sql/validation.sql
+new file mode 100644
+index 0000000..cbd91c1
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/sql/validation.sql
+@@ -0,0 +1,18 @@
++-- Change catalog explicitly for your environment.
++USE CATALOG retail_dev;
++SELECT validation_status, count(*) FROM dq.validated_events GROUP BY ALL;
++SELECT event_id, source_file, rejection_reasons, raw_payload FROM dq.invalid_events;
++SELECT * FROM dq.duplicate_audit;
++SELECT * FROM dq.cdc_conflicts;
++SELECT * FROM gold.customer_history ORDER BY customer_id, record_version;
++SELECT * FROM gold.sales_summary ORDER BY date, hour;
++SELECT * FROM gold.streaming_dashboard ORDER BY window.start DESC;
++SELECT * FROM table_changes('retail_dev.silver.orders', 0);
++SELECT event_type, level, timestamp, details FROM dq.pipeline_event_log
++WHERE event_type IN ('flow_progress', 'update_progress') ORDER BY timestamp DESC;
++-- Runtime metrics JSON is version-sensitive: retain raw details before selecting fields.
++SELECT timestamp, origin.flow_name,
++  details:flow_progress:metrics:num_output_rows AS output_rows,
++  details:flow_progress:data_quality AS expectations
++FROM dq.pipeline_event_log WHERE event_type='flow_progress';
++SELECT count(*) AS errors FROM dq.pipeline_event_log WHERE level='ERROR';
+diff --git a/projects/databricks-streaming-pipeline/src/pipeline.py b/projects/databricks-streaming-pipeline/src/pipeline.py
+new file mode 100644
+index 0000000..6ed5ae9
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/src/pipeline.py
+@@ -0,0 +1,180 @@
++"""Run only inside a Databricks Lakeflow Spark Declarative Pipeline.
++No writes/actions inside dataset definitions; Lakeflow owns orchestration and checkpoints.
++"""
++import sys
++from pathlib import Path
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++from pyspark import pipelines as dp
++from pyspark.sql import functions as F, Window, SparkSession
++from retail.config import Config
++from retail.transforms import (parse_events, validate, validation_rules, deduplicate,
++    customer_changes, order_changes, flatten_items, sales_summary, window_metrics)
++
++spark = SparkSession.getActiveSession()
++cfg = Config.from_spark(spark)
++t = cfg.table
++CDF = {"delta.enableChangeDataFeed": "true"}
++
++@dp.table(name=t("bronze", "raw_events"), table_properties={"delta.appendOnly": "true"})
++def raw_events():
++    # Text is intentional: malformed JSON and exact payload text survive ingestion.
++    return (spark.readStream.format("cloudFiles").option("cloudFiles.format", "text")
++        .option("cloudFiles.maxFilesPerTrigger", "1000").load(cfg.source_path)
++        .select(F.col("value").alias("raw_payload"),
++            F.col("_metadata.file_path").alias("source_file"),
++            F.col("_metadata.file_modification_time").alias("source_file_modification_timestamp"),
++            F.current_timestamp().alias("ingestion_timestamp"))
++        .withColumn("processing_timestamp", F.current_timestamp())
++        .withColumn("event_id", F.get_json_object("raw_payload", "$.event_id"))
++        .withColumn("event_type", F.get_json_object("raw_payload", "$.event_type"))
++        .withColumn("event_timestamp", F.get_json_object("raw_payload", "$.event_timestamp"))
++        .withColumn("rescued_data", F.when(F.get_json_object("raw_payload", "$").isNull(), F.col("raw_payload")))
++        .withColumn("pipeline_contract_version", F.lit("3")))
++
++@dp.table(name=t("bronze", "schema_probe"))
++def schema_probe():
++    # Independent diagnostic ingestion: genuine Auto Loader rescue of new fields/type mismatches.
++    # It is not joined to raw_events and never controls business record counts.
++    return (spark.readStream.format("cloudFiles").option("cloudFiles.format", "json")
++        .option("cloudFiles.schemaLocation", cfg.schema_location)
++        .option("cloudFiles.schemaEvolutionMode", "rescue")
++        .option("cloudFiles.schemaHints", "event_id STRING, event_timestamp STRING")
++        .option("rescuedDataColumn", "_rescued_data").option("mode", "PERMISSIVE")
++        .option("columnNameOfCorruptRecord", "_corrupt_record")
++        .load(cfg.source_path).select("*", F.col("_metadata.file_path").alias("source_file")))
++
++@dp.table(name=t("dq", "validated_events"))
++@dp.expect_all(validation_rules())
++def validated_events():
++    return validate(parse_events(spark.readStream.table(t("bronze", "raw_events"))), cfg.lateness_seconds)
++
++@dp.table(name=t("dq", "invalid_events"))
++def invalid_events():
++    return spark.readStream.table(t("dq", "validated_events")).filter("NOT is_valid")
++
++@dp.table(name=t("dq", "late_events"))
++def late_events():
++    # Arrival SLA audit, NOT a claim that Spark dropped this row at its current watermark.
++    return spark.readStream.table(t("dq", "validated_events")).filter("is_valid AND is_late_by_sla")
++
++@dp.table(name=t("silver", "events"), table_properties=CDF)
++def silver_events():
++    return deduplicate(spark.readStream.table(t("dq", "validated_events")).filter("is_valid"), cfg.watermark)
++
++@dp.table(name=t("silver", "customer_changes"))
++def customer_cdc_source():
++    # CDC bypasses event-time watermark: old business updates must reach sequence-aware AUTO CDC.
++    return customer_changes(spark.readStream.table(t("dq", "validated_events")).filter("is_valid"))
++
++@dp.table(name=t("silver", "order_changes"))
++def order_cdc_source():
++    return order_changes(spark.readStream.table(t("dq", "validated_events")).filter("is_valid"))
++
++for target, source, key, scd in [
++    ("customers", "customer_changes", "customer_id", 1),
++    ("customer_history", "customer_changes", "customer_id", 2),
++    ("orders", "order_changes", "order_id", 1),
++]:
++    dp.create_streaming_table(name=t("silver", target), table_properties={**CDF,
++        "pipelines.cdc.tombstoneGCThresholdInSeconds": str(cfg.tombstone_seconds)})
++    dp.create_auto_cdc_flow(target=t("silver", target), source=t("silver", source), keys=[key],
++        sequence_by=F.struct("sequence_number", "event_timestamp", "event_id", "payload_hash"),
++        apply_as_deletes=F.expr("operation='DELETE'"), stored_as_scd_type=scd,
++        ignore_null_updates=False)
++
++@dp.materialized_view(name=t("silver", "customer_addresses"))
++def customer_addresses():
++    return spark.read.table(t("silver", "customers")).select("customer_id",
++        F.posexplode("addresses").alias("address_index", "address")).select("customer_id", "address_index", "address.*")
++
++@dp.materialized_view(name=t("silver", "order_items"))
++def current_order_items():
++    return flatten_items(spark.read.table(t("silver", "orders")).filter("order_status <> 'CANCELLED'"))
++
++@dp.table(name=t("silver", "order_created_facts"))
++def order_created_facts():
++    return order_changes(spark.readStream.table(t("silver", "events")).filter("event_type='ORDER_CREATED'"))
++
++@dp.table(name=t("silver", "order_item_events"))
++def order_item_events():
++    return flatten_items(spark.readStream.table(t("silver", "order_created_facts")))
++
++@dp.table(name=t("silver", "payments"))
++def payments():
++    return (spark.readStream.table(t("silver", "events")).filter("event_type='PAYMENT_COMPLETED'")
++        .select("event_id", "event_timestamp", "order.order_id", "order.currency", "order.payment.*")
++        .withColumn("amount", F.expr("try_cast(amount as decimal(18,2))")))
++
++@dp.table(name=t("silver", "shipments"))
++def shipments():
++    return (spark.readStream.table(t("silver", "events")).filter("event_type='SHIPMENT_CREATED'")
++        .select("event_id", "event_timestamp", "order.order_id", "order.shipping.*"))
++
++@dp.materialized_view(name=t("gold", "customer_history"))
++def scd2_business_projection():
++    h = spark.read.table(t("silver", "customer_history"))
++    return (h.withColumn("effective_start_date", F.col("__START_AT.event_timestamp"))
++        .withColumn("effective_end_date", F.col("__END_AT.event_timestamp"))
++        .withColumn("is_current", F.col("__END_AT").isNull())
++        .withColumn("record_version", F.row_number().over(Window.partitionBy("customer_id").orderBy("__START_AT")))
++        .withColumnRenamed("event_timestamp", "source_event_timestamp"))
++
++@dp.materialized_view(name=t("gold", "customer_360"))
++def customer_360():
++    # Grain customer + currency; never add INR to USD. Deleted customers disappear by inner ownership.
++    o = spark.read.table(t("silver", "orders")).filter("order_status <> 'CANCELLED'")
++    totals = o.groupBy("customer_id", "currency").agg(F.count("order_id").alias("lifetime_orders"),
++        F.sum("order_amount").alias("lifetime_revenue"), F.max("created_at").alias("last_order_timestamp"))
++    return (spark.read.table(t("silver", "customers")).join(totals, "customer_id", "left")
++        .fillna({"lifetime_orders": 0, "lifetime_revenue": 0}).withColumn("customer_status", F.lit("ACTIVE")))
++
++@dp.materialized_view(name=t("gold", "sales_summary"))
++def gold_sales_summary():
++    return sales_summary(spark.read.table(t("silver", "order_items")))
++
++@dp.materialized_view(name=t("gold", "product_performance"))
++def product_performance():
++    return (spark.read.table(t("silver", "order_items")).groupBy("product_id", "product_name", "category", "currency")
++        .agg(F.sum("quantity").alias("units_sold"), F.sum("line_revenue").alias("revenue"),
++             F.countDistinct("customer_id").alias("unique_customers")))
++
++# Each operator starts from a persisted append-only fact table; no stream reads of mutable CDC tables.
++def register_window(kind):
++    @dp.table(name=t("gold", f"sales_{kind}"))
++    def metrics():
++        return window_metrics(spark.readStream.table(t("silver", "order_created_facts")), cfg.watermark, kind)
++for kind in ("tumbling", "sliding", "session"):
++    register_window(kind)
++
++@dp.materialized_view(name=t("gold", "streaming_dashboard"))
++def dashboard():
++    # Fresh provisional metrics; streaming window tables only emit finalized windows.
++    return (spark.read.table(t("silver", "order_created_facts"))
++        .groupBy(F.window("event_timestamp", "10 minutes"), "region", "currency")
++        .agg(F.count("order_id").alias("order_count"), F.sum("order_amount").alias("revenue"))
++        .withColumn("average_order_value", F.col("revenue") / F.col("order_count")))
++
++@dp.materialized_view(name=t("dq", "data_quality_metrics"))
++def quality_metrics():
++    return (spark.read.table(t("dq", "validated_events"))
++        .groupBy(F.to_date("ingestion_timestamp").alias("ingestion_date"), "event_type", "operation")
++        .agg(F.count("*").alias("records_processed"),
++             F.sum((~F.col("is_valid")).cast("long")).alias("records_rejected"),
++             F.sum(F.col("is_late_by_sla").cast("long")).alias("late_by_sla"),
++             F.avg("arrival_delay_seconds").alias("average_arrival_delay_seconds")))
++
++@dp.materialized_view(name=t("dq", "duplicate_audit"))
++def duplicate_audit():
++    return (spark.read.table(t("dq", "validated_events")).filter("event_id IS NOT NULL")
++        .groupBy("event_id").agg(F.count("*").alias("copies"),
++            F.countDistinct("payload_hash").alias("payload_variants"))
++        .filter("copies>1").withColumn("duplicate_count", F.col("copies") - 1))
++
++@dp.materialized_view(name=t("dq", "cdc_conflicts"))
++def cdc_conflicts():
++    return (spark.read.table(t("dq", "validated_events")).filter("is_valid AND entity IS NOT NULL")
++        .withColumn("business_key", F.when(F.col("entity")=="customer", F.col("customer.customer_id"))
++            .otherwise(F.col("order.order_id")))
++        .groupBy("entity", "business_key", "sequence_number")
++        .agg(F.countDistinct("payload_hash").alias("payload_variants"), F.collect_set("event_id").alias("event_ids"))
++        .filter("payload_variants>1"))
+diff --git a/projects/databricks-streaming-pipeline/src/retail/__init__.py b/projects/databricks-streaming-pipeline/src/retail/__init__.py
+new file mode 100644
+index 0000000..7d9d12b
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/src/retail/__init__.py
+@@ -0,0 +1 @@
++"""Pure Spark transformations; pipeline registration lives in src/pipeline.py."""
+diff --git a/projects/databricks-streaming-pipeline/src/retail/config.py b/projects/databricks-streaming-pipeline/src/retail/config.py
+new file mode 100644
+index 0000000..9845773
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/src/retail/config.py
+@@ -0,0 +1,31 @@
++import re
++from dataclasses import dataclass
++
++@dataclass(frozen=True)
++class Config:
++    catalog: str
++    source_path: str
++    schema_location: str
++    watermark: str = "30 minutes"
++    lateness_seconds: int = 1800
++    trigger_interval: str = "30 seconds"
++    tombstone_seconds: int = 604800
++
++    @classmethod
++    def from_spark(cls, spark):
++        prefix = "retail."
++        cfg = cls(
++            catalog=spark.conf.get(prefix + "catalog"),
++            source_path=spark.conf.get(prefix + "source_path"),
++            schema_location=spark.conf.get(prefix + "schema_location"),
++            watermark=spark.conf.get(prefix + "watermark", "30 minutes"),
++            lateness_seconds=int(spark.conf.get(prefix + "lateness_seconds", "1800")),
++            trigger_interval=spark.conf.get("pipelines.trigger.interval", "30 seconds"),
++            tombstone_seconds=int(spark.conf.get(prefix + "tombstone_seconds", "604800")),
++        )
++        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", cfg.catalog):
++            raise ValueError("catalog must be a simple Unity Catalog identifier")
++        return cfg
++
++    def table(self, layer, name):
++        return f"{self.catalog}.{layer}.{name}"
+diff --git a/projects/databricks-streaming-pipeline/src/retail/schemas.py b/projects/databricks-streaming-pipeline/src/retail/schemas.py
+new file mode 100644
+index 0000000..0776e9e
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/src/retail/schemas.py
+@@ -0,0 +1,21 @@
++# Strings deliberately absorb JSON numeric/string drift; try_cast enforces business types later.
++ADDRESS = "STRUCT<address_type:STRING,city:STRING,state:STRING,country:STRING,postal_code:STRING>"
++CUSTOMER = f"""STRUCT<customer_id:STRING,name:STRUCT<first_name:STRING,last_name:STRING>,
++email:STRING,phone:STRING,addresses:ARRAY<{ADDRESS}>,loyalty_tier:STRING,
++marketing_preferences:STRUCT<email:BOOLEAN,sms:BOOLEAN>>"""
++ITEM = "STRUCT<product_id:STRING,product_name:STRING,category:STRING,quantity:STRING,unit_price:STRING>"
++ORDER = f"""STRUCT<order_id:STRING,order_status:STRING,currency:STRING,created_at:STRING,
++items:ARRAY<{ITEM}>,payment:STRUCT<payment_id:STRING,payment_method:STRING,
++payment_status:STRING,amount:STRING>,shipping:STRUCT<carrier:STRING,tracking_id:STRING,
++estimated_delivery:STRING>>"""
++SNAPSHOT = f"STRUCT<customer:{CUSTOMER},order:{ORDER}>"
++EVENT = f"""STRUCT<event_id:STRING,event_type:STRING,event_timestamp:STRING,
++source:STRUCT<system:STRING,region:STRING,application:STRING>,customer:{CUSTOMER},order:{ORDER},
++metadata:STRUCT<schema_version:STRING,ingestion_source:STRING,correlation_id:STRING,replay_of:STRING>,
++cdc:STRUCT<entity:STRING,operation:STRING,sequence_number:STRING,before:{SNAPSHOT},after:{SNAPSHOT}>,
++_corrupt_record:STRING>"""
++EVENT_TYPES = (
++    "ORDER_CREATED", "ORDER_UPDATED", "ORDER_CANCELLED", "ORDER_DELETED",
++    "CUSTOMER_CREATED", "CUSTOMER_UPDATED", "CUSTOMER_DELETED",
++    "PAYMENT_COMPLETED", "SHIPMENT_CREATED", "PRODUCT_UPDATED",
++)
+diff --git a/projects/databricks-streaming-pipeline/src/retail/transforms.py b/projects/databricks-streaming-pipeline/src/retail/transforms.py
+new file mode 100644
+index 0000000..bd8ab14
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/src/retail/transforms.py
+@@ -0,0 +1,128 @@
++from pyspark.sql import functions as F
++from retail.schemas import EVENT, EVENT_TYPES
++
++
++def parse_events(raw):
++    parsed = raw.withColumn("payload", F.from_json("raw_payload", EVENT, {
++        "mode": "PERMISSIVE", "columnNameOfCorruptRecord": "_corrupt_record"}))
++    return (parsed
++        .withColumn("event_id", F.col("payload.event_id"))
++        .withColumn("event_type", F.col("payload.event_type"))
++        .withColumn("event_timestamp", F.expr("try_cast(payload.event_timestamp as timestamp)"))
++        .withColumn("operation", F.upper(F.col("payload.cdc.operation")))
++        .withColumn("entity", F.lower(F.col("payload.cdc.entity")))
++        .withColumn("sequence_number", F.expr("try_cast(payload.cdc.sequence_number as bigint)"))
++        .withColumn("customer", F.when(F.col("operation") == "DELETE",
++            F.coalesce("payload.cdc.before.customer", "payload.customer"))
++            .otherwise(F.coalesce("payload.cdc.after.customer", "payload.customer")))
++        .withColumn("order", F.when(F.col("operation") == "DELETE",
++            F.coalesce("payload.cdc.before.order", "payload.order"))
++            .otherwise(F.coalesce("payload.cdc.after.order", "payload.order")))
++        .withColumn("payload_hash", F.sha2("raw_payload", 256)))
++
++
++def validation_rules():
++    valid_types = ",".join(repr(t) for t in EVENT_TYPES)
++    return {
++        "json": "payload IS NOT NULL AND payload._corrupt_record IS NULL",
++        "event_id": "event_id IS NOT NULL AND trim(event_id) <> ''",
++        "event_type": f"event_type IN ({valid_types})",
++        "timestamp": "event_timestamp IS NOT NULL AND event_timestamp >= TIMESTAMP '2020-01-01' "
++                     "AND event_timestamp <= ingestion_timestamp + INTERVAL 5 MINUTES",
++        "version": "payload.metadata.schema_version IN ('1.0','2.0','3.0')",
++        "customer_id": "customer.customer_id IS NOT NULL AND trim(customer.customer_id) <> ''",
++        "email": "operation = 'DELETE' OR customer.email RLIKE '^[^ @]+@[^ @]+[.][^ @]+$'",
++        "country": "operation = 'DELETE' OR customer.addresses IS NULL OR "
++                   "forall(customer.addresses, a -> coalesce(a.country IN ('India','US','GB','IN'), false))",
++        "cdc": "payload.cdc IS NULL OR (entity IN ('customer','order') AND "
++               "operation IN ('INSERT','UPDATE','DELETE') AND sequence_number >= 0)",
++        "cdc_required": "NOT (event_type LIKE 'CUSTOMER_%' OR event_type LIKE 'ORDER_%') OR payload.cdc IS NOT NULL",
++        "cdc_entity": "payload.cdc IS NULL OR ((entity='customer' AND event_type LIKE 'CUSTOMER_%') OR "
++                      "(entity='order' AND event_type LIKE 'ORDER_%'))",
++        "cdc_operation": "payload.cdc IS NULL OR (CASE WHEN event_type LIKE '%_CREATED' THEN operation='INSERT' "
++                         "WHEN event_type LIKE '%_DELETED' THEN operation='DELETE' ELSE operation='UPDATE' END)",
++        "after_image": "payload.cdc IS NULL OR operation='DELETE' OR "
++                       "(entity='customer' AND payload.cdc.after.customer IS NOT NULL) OR "
++                       "(entity='order' AND payload.cdc.after.order IS NOT NULL)",
++        "order_id": "NOT (event_type LIKE 'ORDER_%' OR event_type IN ('PAYMENT_COMPLETED','SHIPMENT_CREATED')) OR "
++                    "(order.order_id IS NOT NULL AND trim(order.order_id) <> '')",
++        "items": "NOT (event_type LIKE 'ORDER_%') OR operation='DELETE' OR "
++                 "(size(order.items)>0 AND forall(order.items, i -> coalesce("
++                 "i.product_id IS NOT NULL AND try_cast(i.quantity AS INT)>0 AND "
++                 "try_cast(i.quantity AS DECIMAL(18,4))=try_cast(i.quantity AS INT) AND "
++                 "try_cast(i.unit_price AS DECIMAL(18,2))>=0, false)))",
++        "currency": "NOT (event_type LIKE 'ORDER_%') OR operation='DELETE' OR order.currency IN ('INR','USD','GBP')",
++        "order_time": "NOT (event_type LIKE 'ORDER_%') OR operation='DELETE' OR "
++                      "try_cast(order.created_at AS TIMESTAMP) IS NOT NULL",
++        "payment": "order.payment IS NULL OR (order.payment.payment_id IS NOT NULL AND "
++                   "try_cast(order.payment.amount AS DECIMAL(18,2))>=0)",
++        "payment_required": "event_type <> 'PAYMENT_COMPLETED' OR order.payment IS NOT NULL",
++        "shipment_required": "event_type <> 'SHIPMENT_CREATED' OR order.shipping.tracking_id IS NOT NULL",
++    }
++
++
++def validate(parsed, lateness_seconds=1800):
++    failures = [F.when(~F.coalesce(F.expr(rule), F.lit(False)), F.lit(name))
++                for name, rule in validation_rules().items()]
++    return (parsed.withColumn("rejection_reasons", F.filter(F.array(*failures), lambda x: x.isNotNull()))
++        .withColumn("is_valid", F.size("rejection_reasons") == 0)
++        .withColumn("validation_status", F.when(F.col("is_valid"), "VALID").otherwise("INVALID"))
++        .withColumn("arrival_delay_seconds", F.col("ingestion_timestamp").cast("long") - F.col("event_timestamp").cast("long"))
++        .withColumn("is_late_by_sla", F.col("arrival_delay_seconds") > lateness_seconds))
++
++
++def deduplicate(df, watermark="30 minutes"):
++    return df.withWatermark("event_timestamp", watermark).dropDuplicatesWithinWatermark(["event_id"])
++
++
++def customer_changes(df):
++    # HOME address chosen explicitly; an empty array produces null, not an ANSI bounds failure.
++    home = F.expr("try_element_at(filter(customer.addresses, a -> a.address_type='HOME'), 1)")
++    return (df.filter("entity='customer'").withColumn("home", home).select(
++        "event_id", "operation", "sequence_number", "event_timestamp", "payload_hash",
++        F.col("customer.customer_id").alias("customer_id"),
++        F.concat_ws(" ", "customer.name.first_name", "customer.name.last_name").alias("customer_name"),
++        "customer.email", "home.city", "home.state", "customer.addresses",
++        "customer.loyalty_tier", "customer.marketing_preferences"))
++
++
++def order_changes(df):
++    return (df.filter("entity='order'").select(
++        "event_id", "operation", "sequence_number", "event_timestamp", "payload_hash",
++        F.col("customer.customer_id").alias("customer_id"),
++        "order.*", F.col("payload.source.region").alias("region"))
++        .withColumn("created_at", F.expr("try_cast(created_at as timestamp)"))
++        .withColumn("order_amount", F.expr("aggregate(items, cast(0 as decimal(28,2)), "
++            "(s,i) -> cast(s + try_cast(i.quantity as int)*try_cast(i.unit_price as decimal(18,2)) as decimal(28,2)))")))
++
++
++def flatten_items(orders):
++    # Separate item and address projections prevent a Cartesian expansion.
++    return (orders.select("order_id", "customer_id", "currency", "region", "created_at", "event_timestamp",
++                         F.posexplode("items").alias("item_index", "item"))
++        .select("order_id", "customer_id", "currency", "region", "created_at", "event_timestamp", "item_index",
++                "item.product_id", "item.product_name", "item.category",
++                F.expr("try_cast(item.quantity as int)").alias("quantity"),
++                F.expr("try_cast(item.unit_price as decimal(18,2))").alias("unit_price"))
++        .withColumn("line_revenue", F.col("quantity") * F.col("unit_price")))
++
++
++def sales_summary(items):
++    return (items.groupBy(F.to_date("created_at").alias("date"), F.hour("created_at").alias("hour"),
++                          "region", "category", "currency")
++        .agg(F.countDistinct("order_id").alias("order_count"), F.count("item_index").alias("item_count"),
++             F.sum("quantity").alias("total_quantity"), F.sum("line_revenue").alias("gross_revenue"))
++        .withColumn("average_order_value", F.col("gross_revenue") / F.col("order_count")))
++
++
++def window_metrics(orders, watermark="30 minutes", kind="tumbling"):
++    orders = orders.withWatermark("event_timestamp", watermark)
++    if kind == "session":
++        groups = [F.session_window("event_timestamp", "10 minutes").alias("window"), "customer_id", "currency"]
++    else:
++        window = F.window("event_timestamp", "10 minutes") if kind == "tumbling" else F.window("event_timestamp", "30 minutes", "5 minutes")
++        groups = [window.alias("window"), "region", "currency"]
++    return (orders.groupBy(*groups).agg(F.count("order_id").alias("order_count"),
++            F.sum("order_amount").alias("revenue"),
++            F.sum(F.expr("aggregate(items, 0L, (s,i) -> s + try_cast(i.quantity as bigint))")).alias("quantity"))
++        .withColumn("average_order_value", F.col("revenue") / F.col("order_count")))
+diff --git a/projects/databricks-streaming-pipeline/tests/__init__.py b/projects/databricks-streaming-pipeline/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/projects/databricks-streaming-pipeline/tests/conftest.py b/projects/databricks-streaming-pipeline/tests/conftest.py
+new file mode 100644
+index 0000000..a908a4e
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/tests/conftest.py
+@@ -0,0 +1,13 @@
++import os
++import pytest
++from pyspark.sql import SparkSession
++
++@pytest.fixture(scope="session")
++def spark():
++    os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
++    session = (SparkSession.builder.master("local[2]").appName("retail-tests")
++        .config("spark.ui.enabled", "false").config("spark.sql.shuffle.partitions", "2")
++        .config("spark.sql.session.timeZone", "UTC").getOrCreate())
++    session.sparkContext.setLogLevel("ERROR")
++    yield session
++    session.stop()
+diff --git a/projects/databricks-streaming-pipeline/tests/integration/test_medallion.py b/projects/databricks-streaming-pipeline/tests/integration/test_medallion.py
+new file mode 100644
+index 0000000..fe0a9fd
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/tests/integration/test_medallion.py
+@@ -0,0 +1,14 @@
++from decimal import Decimal
++from retail.transforms import parse_events, validate, order_changes, flatten_items, sales_summary, window_metrics
++from tests.unit.test_transforms import frame, NOW
++from scripts.generate import event
++
++def test_bronze_to_gold(spark):
++    data = validate(parse_events(frame(spark, [event(1, NOW), event(2, NOW)]))).filter("is_valid")
++    orders = order_changes(data)
++    summaries = sales_summary(flatten_items(orders)).collect()
++    assert sum(r.gross_revenue for r in summaries) == Decimal("303000.00")
++    assert sum(r.total_quantity for r in summaries) == 6
++    metrics = window_metrics(orders).first()
++    assert metrics.order_count == 2 and metrics.quantity == 6
++    assert metrics.average_order_value == Decimal("151500.00")
+diff --git a/projects/databricks-streaming-pipeline/tests/streaming/test_recovery.py b/projects/databricks-streaming-pipeline/tests/streaming/test_recovery.py
+new file mode 100644
+index 0000000..a83519c
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/tests/streaming/test_recovery.py
+@@ -0,0 +1,31 @@
++import json
++from datetime import datetime, timedelta
++import pytest
++from retail.transforms import deduplicate
++
++@pytest.mark.streaming
++def test_watermark_dedup_and_checkpoint_restart(spark, tmp_path):
++    source = tmp_path / "input"; source.mkdir()
++    output = tmp_path / "output"
++    checkpoint = tmp_path / "checkpoint"
++    base = datetime(2026, 9, 6, 10)
++    def write(n, records):
++        (source / f"{n}.json").write_text("\n".join(json.dumps({"event_id": k,
++            "event_timestamp": (base+timedelta(minutes=m)).isoformat()}) for k,m in records))
++    def run():
++        data = spark.readStream.schema("event_id string, event_timestamp timestamp").json(str(source))
++        q = (deduplicate(data).writeStream.format("parquet").option("path", str(output))
++            .option("checkpointLocation", str(checkpoint)).trigger(availableNow=True).start())
++        q.awaitTermination(60)
++        assert not q.isActive
++    write(1, [("one",0), ("one",0), ("two",5)])
++    run()
++    write(2, [("one",0), ("future",90)])
++    run()
++    write(3, [("too-late",1), ("new",95)])
++    run()
++    ids = {r.event_id for r in spark.read.parquet(str(output)).collect()}
++    assert ids == {"one", "two", "future", "new"}
++    assert spark.read.parquet(str(output)).count() == 4
++    run()  # unchanged source + checkpoint does not write another copy
++    assert spark.read.parquet(str(output)).count() == 4
+diff --git a/projects/databricks-streaming-pipeline/tests/unit/__init__.py b/projects/databricks-streaming-pipeline/tests/unit/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/projects/databricks-streaming-pipeline/tests/unit/test_transforms.py b/projects/databricks-streaming-pipeline/tests/unit/test_transforms.py
+new file mode 100644
+index 0000000..b447d13
+--- /dev/null
++++ b/projects/databricks-streaming-pipeline/tests/unit/test_transforms.py
+@@ -0,0 +1,72 @@
++import json
++from datetime import datetime, timezone
++from decimal import Decimal
++import pytest
++from retail.transforms import parse_events, validate, order_changes, customer_changes, flatten_items, sales_summary
++from scripts.generate import event, scenarios
++
++NOW = datetime(2026, 9, 6, 10, 0, tzinfo=timezone.utc)
++def frame(spark, records):
++    from pyspark.sql import functions as F
++    encoded = [json.dumps(r) if isinstance(r, dict) else r for r in records]
++    # JVM-native inputs keep these expression tests independent of Python worker daemons.
++    return spark.range(len(encoded)).select(
++        F.element_at(F.array(*[F.lit(r) for r in encoded]), (F.col("id")+1).cast("int")).alias("raw_payload"),
++        F.lit(NOW).alias("ingestion_timestamp"))
++
++
++def test_parse_quarantine_and_evolution(spark):
++    result = validate(parse_events(frame(spark, scenarios(NOW)))).collect()
++    assert len(result) == 18
++    invalid = [r for r in result if not r.is_valid]
++    assert len(invalid) == 5
++    assert any("json" in r.rejection_reasons for r in invalid)
++    evolved = next(r for r in result if r.event_id == "evt-9-ORDER_CREATED")
++    assert evolved.customer.marketing_preferences.email is True
++    assert evolved.customer.loyalty_tier == "GOLD"
++    assert next(r for r in result if r.event_id == "evt-6-ORDER_CREATED").is_late_by_sla
++
++@pytest.mark.parametrize("field,value,reason", [
++    ("event_id", None, "event_id"), ("event_timestamp", "bad", "timestamp"),
++    ("event_type", "NOPE", "event_type"),
++])
++def test_invalid_envelope(spark, field, value, reason):
++    e = event(1, NOW); e[field] = value
++    assert reason in validate(parse_events(frame(spark, [e]))).first().rejection_reasons
++
++def test_invalid_nested_and_explicit_null(spark):
++    data = []
++    for quantity in ("0", "-1", "1.5", None, "oops"):
++        e = event(1, NOW)
++        e["cdc"]["after"]["order"]["items"][0]["quantity"] = quantity
++        data.append(e)
++    e = event(2, NOW); e["customer"]["email"] = "not-an-email"; data.append(e)
++    e = event(3, NOW); e["customer"]["addresses"][0]["country"] = "INVALID"; data.append(e)
++    rows = validate(parse_events(frame(spark, data))).collect()
++    assert all(not r.is_valid for r in rows)
++    assert "email" in rows[-2].rejection_reasons
++    assert "country" in rows[-1].rejection_reasons
++
++def test_items_do_not_multiply_by_addresses(spark):
++    orders = order_changes(parse_events(frame(spark, [event(1, NOW)])))
++    assert orders.first().order_amount == Decimal("151500.00")
++    items = flatten_items(orders).collect()
++    assert len(items) == 2  # two items, two addresses: not four rows
++    assert sum(r.line_revenue for r in items) == Decimal("151500.00")
++
++def test_category_distinct_order_count(spark):
++    e = event(1, NOW)
++    e["cdc"]["after"]["order"]["items"][1]["category"] = "Electronics"
++    summary = sales_summary(flatten_items(order_changes(parse_events(frame(spark, [e]))))).first()
++    assert summary.order_count == 1
++    assert summary.item_count == 2
++    assert summary.average_order_value == Decimal("151500.00")
++
++def test_cdc_delete_and_out_of_order_projection(spark):
++    records = [r for r in scenarios(NOW) if isinstance(r, dict) and r["event_type"].startswith("CUSTOMER")]
++    rows = customer_changes(parse_events(frame(spark, records))).collect()
++    latest = max(rows, key=lambda r: r.sequence_number)
++    assert latest.operation == "DELETE" and latest.customer_id == "C001"
++    assert next(r for r in rows if r.sequence_number == 105).city == "Hyderabad"
++    assert next(r for r in rows if r.sequence_number == 102).city == "Mumbai"
++    # Tests source preparation, not a substitute for Databricks AUTO CDC engine acceptance.
+-- 
+2.51.1
+

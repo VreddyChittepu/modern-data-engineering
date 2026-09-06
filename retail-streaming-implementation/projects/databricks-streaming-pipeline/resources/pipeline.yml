@@ -1,0 +1,27 @@
+resources:
+  pipelines:
+    retail:
+      name: retail-streaming-${bundle.target}
+      catalog: ${var.catalog}
+      schema: ${var.pipeline_schema}
+      serverless: true
+      photon: true
+      channel: CURRENT
+      edition: ADVANCED
+      continuous: ${var.continuous}
+      libraries:
+        - file:
+            path: ../src/pipeline.py
+      configuration:
+        retail.catalog: ${var.catalog}
+        retail.source_path: ${var.source_path}
+        retail.schema_location: ${var.schema_location}
+        retail.watermark: ${var.watermark}
+        retail.lateness_seconds: ${var.lateness_seconds}
+        retail.tombstone_seconds: "604800"
+        pipelines.trigger.interval: ${var.trigger_interval}
+        spark.sql.session.timeZone: UTC
+      event_log:
+        name: pipeline_event_log
+        catalog: ${var.catalog}
+        schema: dq

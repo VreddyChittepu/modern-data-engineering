@@ -1,0 +1,42 @@
+bundle:
+  name: retail-streaming
+include:
+  - resources/*.yml
+variables:
+  catalog:
+    default: retail_dev
+  pipeline_schema:
+    default: silver
+  source_path:
+    default: /Volumes/${var.catalog}/bronze/landing/orders
+  schema_location:
+    default: /Volumes/${var.catalog}/bronze/pipeline_state/schema_probe
+  watermark:
+    default: 30 minutes
+  lateness_seconds:
+    default: "1800"
+  trigger_interval:
+    default: 30 seconds
+  service_principal:
+    description: Application ID of the deployment/runtime service principal
+  continuous:
+    type: complex
+    default: false
+targets:
+  dev:
+    default: true
+    mode: development
+    variables:
+      catalog: retail_dev
+  test:
+    variables:
+      catalog: retail_test
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: retail_prod
+      continuous: true
+    run_as:
+      service_principal_name: ${var.service_principal}
