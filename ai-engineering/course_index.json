@@ -1,0 +1,152 @@
+[
+  {
+    "file": "notebooks/00_setup_and_learning_path.ipynb",
+    "title": "Setup and learning path",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/01_python_numpy.ipynb",
+    "title": "Python and NumPy for AI",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/02_math_gradient_descent.ipynb",
+    "title": "Math, probability, and gradient descent",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/03_spark_delta_data_quality.ipynb",
+    "title": "Spark, Delta Lake, and data quality",
+    "execution_mode": "databricks"
+  },
+  {
+    "file": "notebooks/04_features_and_leakage.ipynb",
+    "title": "EDA, preprocessing, and data leakage",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/05_regression.ipynb",
+    "title": "Regression: baseline, linear model, and regularization",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/06_classification_metrics.ipynb",
+    "title": "Classification, ROC-AUC, PR-AUC, and thresholds",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/07_trees_and_ensembles.ipynb",
+    "title": "Decision trees, random forests, and boosting",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/08_cross_validation_tuning.ipynb",
+    "title": "Cross-validation and hyperparameter tuning",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/09_unsupervised_learning.ipynb",
+    "title": "Clustering, PCA, and anomaly detection",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/10_time_series_forecasting.ipynb",
+    "title": "Time series forecasting and backtesting",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/11_recommender_systems.ipynb",
+    "title": "Recommendation and ranking",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/12_spark_ml_pipeline.ipynb",
+    "title": "Distributed ML with Spark DataFrames",
+    "execution_mode": "databricks"
+  },
+  {
+    "file": "notebooks/13_mlflow_experiment_tracking.ipynb",
+    "title": "MLflow experiment tracking and model packaging",
+    "execution_mode": "databricks"
+  },
+  {
+    "file": "notebooks/14_registry_and_batch_inference.ipynb",
+    "title": "Unity Catalog registry and batch inference",
+    "execution_mode": "databricks"
+  },
+  {
+    "file": "notebooks/15_model_serving.ipynb",
+    "title": "Deploy and query a model serving endpoint",
+    "execution_mode": "optional"
+  },
+  {
+    "file": "notebooks/16_neural_networks.ipynb",
+    "title": "Neural networks and backpropagation from scratch",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/17_nlp_text_classification.ipynb",
+    "title": "NLP, tokenization, and text classification",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/18_transformers_attention.ipynb",
+    "title": "Transformers: tokenization, embeddings, and causal attention",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/19_embeddings_similarity.ipynb",
+    "title": "Embeddings and similarity search",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/20_prompting_structured_outputs.ipynb",
+    "title": "Prompt engineering and structured outputs",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/21_rag_pipeline.ipynb",
+    "title": "RAG: chunking, retrieval, citations, and abstention",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/22_managed_vector_search.ipynb",
+    "title": "Managed vector search over Delta data",
+    "execution_mode": "optional"
+  },
+  {
+    "file": "notebooks/23_agents_and_tool_calling.ipynb",
+    "title": "Agents, tool calling, and bounded execution",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/24_genai_evaluation.ipynb",
+    "title": "GenAI evaluation and retrieval regression tests",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/25_fine_tuning_lora.ipynb",
+    "title": "Fine-tuning and LoRA",
+    "execution_mode": "optional"
+  },
+  {
+    "file": "notebooks/26_monitoring_fairness_explainability.ipynb",
+    "title": "Monitoring, fairness, and explainability",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/27_end_to_end_capstone.ipynb",
+    "title": "Capstone: churn model from Delta to MLflow predictions",
+    "execution_mode": "databricks"
+  },
+  {
+    "file": "notebooks/28_multimodal_foundations.ipynb",
+    "title": "Vision and audio foundations",
+    "execution_mode": "portable"
+  },
+  {
+    "file": "notebooks/29_security_reliability_cost.ipynb",
+    "title": "Security, reliability, caching, and cost controls",
+    "execution_mode": "portable"
+  }
+]

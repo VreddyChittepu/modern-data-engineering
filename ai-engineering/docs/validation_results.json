@@ -1,0 +1,169 @@
+{
+  "syntax_checked": [
+    "00_setup_and_learning_path.ipynb",
+    "01_python_numpy.ipynb",
+    "02_math_gradient_descent.ipynb",
+    "03_spark_delta_data_quality.ipynb",
+    "04_features_and_leakage.ipynb",
+    "05_regression.ipynb",
+    "06_classification_metrics.ipynb",
+    "07_trees_and_ensembles.ipynb",
+    "08_cross_validation_tuning.ipynb",
+    "09_unsupervised_learning.ipynb",
+    "10_time_series_forecasting.ipynb",
+    "11_recommender_systems.ipynb",
+    "12_spark_ml_pipeline.ipynb",
+    "13_mlflow_experiment_tracking.ipynb",
+    "14_registry_and_batch_inference.ipynb",
+    "15_model_serving.ipynb",
+    "16_neural_networks.ipynb",
+    "17_nlp_text_classification.ipynb",
+    "18_transformers_attention.ipynb",
+    "19_embeddings_similarity.ipynb",
+    "20_prompting_structured_outputs.ipynb",
+    "21_rag_pipeline.ipynb",
+    "22_managed_vector_search.ipynb",
+    "23_agents_and_tool_calling.ipynb",
+    "24_genai_evaluation.ipynb",
+    "25_fine_tuning_lora.ipynb",
+    "26_monitoring_fairness_explainability.ipynb",
+    "27_end_to_end_capstone.ipynb",
+    "28_multimodal_foundations.ipynb",
+    "29_security_reliability_cost.ipynb"
+  ],
+  "executed": [
+    {
+      "notebook": "00_setup_and_learning_path.ipynb",
+      "seconds": 0.887,
+      "mode": "portable"
+    },
+    {
+      "notebook": "01_python_numpy.ipynb",
+      "seconds": 0.002,
+      "mode": "portable"
+    },
+    {
+      "notebook": "02_math_gradient_descent.ipynb",
+      "seconds": 0.006,
+      "mode": "portable"
+    },
+    {
+      "notebook": "04_features_and_leakage.ipynb",
+      "seconds": 0.023,
+      "mode": "portable"
+    },
+    {
+      "notebook": "05_regression.ipynb",
+      "seconds": 0.026,
+      "mode": "portable"
+    },
+    {
+      "notebook": "06_classification_metrics.ipynb",
+      "seconds": 0.026,
+      "mode": "portable"
+    },
+    {
+      "notebook": "07_trees_and_ensembles.ipynb",
+      "seconds": 0.232,
+      "mode": "portable"
+    },
+    {
+      "notebook": "08_cross_validation_tuning.ipynb",
+      "seconds": 0.076,
+      "mode": "portable"
+    },
+    {
+      "notebook": "09_unsupervised_learning.ipynb",
+      "seconds": 0.116,
+      "mode": "portable"
+    },
+    {
+      "notebook": "10_time_series_forecasting.ipynb",
+      "seconds": 0.004,
+      "mode": "portable"
+    },
+    {
+      "notebook": "11_recommender_systems.ipynb",
+      "seconds": 0.001,
+      "mode": "portable"
+    },
+    {
+      "notebook": "15_model_serving.ipynb",
+      "seconds": 0.001,
+      "mode": "optional"
+    },
+    {
+      "notebook": "16_neural_networks.ipynb",
+      "seconds": 0.121,
+      "mode": "portable"
+    },
+    {
+      "notebook": "17_nlp_text_classification.ipynb",
+      "seconds": 0.009,
+      "mode": "portable"
+    },
+    {
+      "notebook": "18_transformers_attention.ipynb",
+      "seconds": 0.002,
+      "mode": "portable"
+    },
+    {
+      "notebook": "19_embeddings_similarity.ipynb",
+      "seconds": 0.004,
+      "mode": "portable"
+    },
+    {
+      "notebook": "20_prompting_structured_outputs.ipynb",
+      "seconds": 0.001,
+      "mode": "portable"
+    },
+    {
+      "notebook": "21_rag_pipeline.ipynb",
+      "seconds": 0.004,
+      "mode": "portable"
+    },
+    {
+      "notebook": "22_managed_vector_search.ipynb",
+      "seconds": 0.001,
+      "mode": "optional"
+    },
+    {
+      "notebook": "23_agents_and_tool_calling.ipynb",
+      "seconds": 0.001,
+      "mode": "portable"
+    },
+    {
+      "notebook": "24_genai_evaluation.ipynb",
+      "seconds": 0.004,
+      "mode": "portable"
+    },
+    {
+      "notebook": "25_fine_tuning_lora.ipynb",
+      "seconds": 0.001,
+      "mode": "optional"
+    },
+    {
+      "notebook": "26_monitoring_fairness_explainability.ipynb",
+      "seconds": 0.06,
+      "mode": "portable"
+    },
+    {
+      "notebook": "28_multimodal_foundations.ipynb",
+      "seconds": 0.023,
+      "mode": "portable"
+    },
+    {
+      "notebook": "29_security_reliability_cost.ipynb",
+      "seconds": 0.003,
+      "mode": "portable"
+    }
+  ],
+  "databricks_not_executed": [
+    "03_spark_delta_data_quality.ipynb",
+    "12_spark_ml_pipeline.ipynb",
+    "13_mlflow_experiment_tracking.ipynb",
+    "14_registry_and_batch_inference.ipynb",
+    "27_end_to_end_capstone.ipynb"
+  ],
+  "failures": []
+}
