@@ -1,0 +1,352 @@
+[
+  {
+    "file": "notebooks/00_setup_assets_and_compute.ipynb",
+    "title": "Setup, Databricks assets and compute",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/01_schemas_types_and_columns.ipynb",
+    "title": "Schemas, types, renaming and column selection",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/02_select_filter_case_and_sort.ipynb",
+    "title": "Select, filter, CASE and sorting",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/03_nulls_nan_and_safe_casts.ipynb",
+    "title": "NULL, NaN, safe casts and data-quality quarantine",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/04_strings_regex_and_numeric_identifiers.ipynb",
+    "title": "Strings, regex, splitting and leading zeros",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/05_dates_timestamps_and_timezones.ipynb",
+    "title": "Dates, timestamps, intervals and timezone semantics",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/06_groupby_aggregations_and_distinct.ipynb",
+    "title": "GroupBy, aggregate functions and distinct counts",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/07_join_types_and_cardinality.ipynb",
+    "title": "Inner, outer, semi, anti and cross joins",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/08_null_safe_and_range_joins.ipynb",
+    "title": "Null-safe equality, range joins and skew inspection",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/09_ranking_and_deduplication.ipynb",
+    "title": "row_number, rank, dense_rank and deterministic deduplication",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/10_window_lag_lead_running_totals.ipynb",
+    "title": "lag, lead, running totals and moving averages",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/11_sessions_and_gaps_islands.ipynb",
+    "title": "Sessionization and gaps-and-islands",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/12_struct_array_explode_and_flatten.ipynb",
+    "title": "Structs, arrays, explode and flatten",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/13_maps_and_higher_order_functions.ipynb",
+    "title": "Maps and higher-order array functions",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/14_json_parsing_and_nested_payloads.ipynb",
+    "title": "JSON parsing, schema enforcement and flattening",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/15_pivot_and_unpivot.ipynb",
+    "title": "Pivot and unpivot",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/16_unions_and_set_operations.ipynb",
+    "title": "unionByName, exceptAll and intersect",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/17_statistics_quantiles_and_outliers.ipynb",
+    "title": "Statistics, quantiles and outlier profiling",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/18_rollup_cube_and_grouping_sets.ipynb",
+    "title": "Rollup, cube and subtotal rows",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/19_sql_views_and_parameter_markers.ipynb",
+    "title": "SQL views and safe parameter binding",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/20_reusable_functions_and_classes.ipynb",
+    "title": "Reusable functions, DataFrame.transform and classes",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/21_native_functions_and_python_udfs.ipynb",
+    "title": "Native expressions versus Python UDFs",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/22_delta_crud_and_merge.ipynb",
+    "title": "Delta CRUD and MERGE upserts",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/23_delta_schema_evolution.ipynb",
+    "title": "Delta schema evolution and selective overwrite",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/24_history_time_travel_and_restore.ipynb",
+    "title": "Delta history, time travel and restore",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/25_scd_type1.ipynb",
+    "title": "SCD Type 1: latest state per business key",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/26_scd_type2_history.ipynb",
+    "title": "SCD Type 2: effective-dated history",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/27_change_data_feed.ipynb",
+    "title": "Delta Change Data Feed",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/28_incremental_batch_and_watermarks.ipynb",
+    "title": "Incremental batch loads and replay-safe upserts",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/29_bronze_silver_gold_capstone.ipynb",
+    "title": "Bronze \u2192 Silver \u2192 Gold ETL capstone",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/30_csv_json_parquet_volume_roundtrips.ipynb",
+    "title": "CSV, JSON and Parquet in Unity Catalog volumes",
+    "mode": "volume",
+    "writes": true,
+    "requires_volume": true
+  },
+  {
+    "file": "notebooks/31_auto_loader.ipynb",
+    "title": "Auto Loader with schema tracking and AvailableNow",
+    "mode": "streaming",
+    "writes": true,
+    "requires_volume": true
+  },
+  {
+    "file": "notebooks/32_delta_streaming_and_checkpoint_restart.ipynb",
+    "title": "Delta streaming and checkpoint restart",
+    "mode": "streaming",
+    "writes": true,
+    "requires_volume": true
+  },
+  {
+    "file": "notebooks/33_streaming_watermark_and_dedup.ipynb",
+    "title": "Event-time watermarks and bounded-state deduplication",
+    "mode": "streaming",
+    "writes": true,
+    "requires_volume": true
+  },
+  {
+    "file": "notebooks/34_foreachbatch_idempotent_merge.ipynb",
+    "title": "foreachBatch with an idempotent Delta MERGE sink",
+    "mode": "streaming",
+    "writes": true,
+    "requires_volume": true
+  },
+  {
+    "file": "notebooks/35_stream_stream_time_bounded_join.ipynb",
+    "title": "Stream-stream joins with watermarks and time bounds",
+    "mode": "streaming",
+    "writes": true,
+    "requires_volume": true
+  },
+  {
+    "file": "notebooks/36_query_plans_broadcast_and_aqe.ipynb",
+    "title": "Query plans, broadcast joins and AQE",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/37_partitions_shuffle_and_file_counts.ipynb",
+    "title": "Repartition, coalesce and output file inspection",
+    "mode": "volume",
+    "writes": true,
+    "requires_volume": true
+  },
+  {
+    "file": "notebooks/38_cache_persist_and_actions.ipynb",
+    "title": "Caching, actions and driver-memory limits",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/39_optimize_and_liquid_clustering.ipynb",
+    "title": "OPTIMIZE and liquid clustering",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/40_unity_catalog_metadata_and_lineage.ipynb",
+    "title": "Unity Catalog metadata, tables and lineage",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/41_widgets_job_parameters_and_task_values.ipynb",
+    "title": "Widgets, job parameters and task values",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/42_jdbc_roundtrip_and_partition_options.ipynb",
+    "title": "JDBC round trip and partitioned reads",
+    "mode": "integration",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/43_db2_partition_batches_and_rejects.ipynb",
+    "title": "DB2 partition writes, batches of 200 and full-row rejects",
+    "mode": "classic-integration",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/44_asset_backed_testing.ipynb",
+    "title": "Asset-backed transformation tests",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/45_reconciliation_full_outer_hashes.ipynb",
+    "title": "Source-target reconciliation",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/46_metadata_driven_transforms.ipynb",
+    "title": "Configuration-driven transformations",
+    "mode": "dataframe",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/47_observability_and_run_manifests.ipynb",
+    "title": "Data-quality metrics and run manifests",
+    "mode": "delta",
+    "writes": true,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/48_spark_ml_feature_pipeline.ipynb",
+    "title": "Spark ML feature engineering and regression",
+    "mode": "spark-ml",
+    "writes": false,
+    "requires_volume": false
+  },
+  {
+    "file": "notebooks/49_classic_rdd_and_partition_processing.ipynb",
+    "title": "Classic RDD map/filter/mapPartitions",
+    "mode": "classic",
+    "writes": false,
+    "requires_volume": false
+  }
+]
