@@ -1,0 +1,14 @@
+{
+  "notebook_code_cells": 16,
+  "syntax": "passed",
+  "source_export_equivalence": "passed",
+  "asset_only_source_policy": "passed",
+  "source_path_cases": 9,
+  "review_budget_cases": 12,
+  "fit_input_and_chronology_static_checks": "passed",
+  "optional_output_disabled": "passed",
+  "databricks_asset_availability": "unverified",
+  "training_mlflow_runtime": "not executed",
+  "financial_decisions": "not implemented",
+  "failures": 0
+}

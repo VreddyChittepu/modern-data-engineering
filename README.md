@@ -41,3 +41,7 @@ The course includes dependency setup, exercises, solution guidance, official ref
 ## Sentiment analysis learning project
 
 [Open the Databricks + MLflow sentiment notebook](projects/sentiment-analysis/README.md): real Databricks Amazon review assets, rating-derived binary sentiment proxies, duplicate-text leakage checks, TF-IDF, logistic regression/Naive Bayes comparison, evaluation charts, threshold-aware packaging and MLflow tracking. Includes an optional bounded SQL AI sentiment comparison, disabled by default. Asset availability and runtime training remain to be checked in your Databricks workspace.
+
+## Credit-card fraud detection learning project
+
+[Open the Databricks + MLflow fraud notebook](projects/credit-card-fraud-detection/README.md): genuine Databricks fraud labels with the PCA-vector/amount-range asset schema, chronological splits, training-only class weighting, AP-based model comparison, validation review-budget threshold selection, held-out error/ranking metrics and threshold-aware MLflow packaging. Dataset access and runtime training remain unverified in your workspace. Produces review flags only; no automatic payment decision or banking integration is implemented.
