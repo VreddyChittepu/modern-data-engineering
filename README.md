@@ -37,3 +37,7 @@ The course includes dependency setup, exercises, solution guidance, official ref
 ## Diabetes prediction learning project
 
 [Open the Databricks + MLflow diabetes notebook](projects/diabetes-prediction/README.md): step-by-step asset preflight, historical binary-label classification, model comparison, leakage-aware evaluation, threshold-aware packaging and MLflow tracking. Requires genuine Pima training/test files in a Databricks-provided sample asset location; individual workspace asset availability remains unverified until its preflight passes. Educational use only; no clinical performance or diagnostic deployment is claimed.
+
+## Sentiment analysis learning project
+
+[Open the Databricks + MLflow sentiment notebook](projects/sentiment-analysis/README.md): real Databricks Amazon review assets, rating-derived binary sentiment proxies, duplicate-text leakage checks, TF-IDF, logistic regression/Naive Bayes comparison, evaluation charts, threshold-aware packaging and MLflow tracking. Includes an optional bounded SQL AI sentiment comparison, disabled by default. Asset availability and runtime training remain to be checked in your Databricks workspace.
