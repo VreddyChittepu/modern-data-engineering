@@ -1,0 +1,13 @@
+{
+  "notebook_code_cells": 15,
+  "syntax": "passed",
+  "source_export_equivalence": "passed",
+  "no_external_or_synthetic_dataset_imports": "passed",
+  "fit_input_static_check": "passed",
+  "source_path_cases": 9,
+  "source_path_checks": "passed",
+  "databricks_asset_availability": "unverified",
+  "training_and_mlflow_runtime": "not executed",
+  "clinical_performance": "not established",
+  "failures": 0
+}

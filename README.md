@@ -33,3 +33,7 @@ The course includes dependency setup, exercises, solution guidance, official ref
 ## Databricks PySpark scenarios
 
 [Open the PySpark hands-on course](pyspark/databricks-scenarios/README.md): 50 step-by-step notebooks using only Databricks-provided `samples.nyctaxi.trips` record data. Covers DataFrames, joins, windows, nested structures, SQL, Delta, SCD/CDC, incremental ETL, Auto Loader, streaming, performance, governance, jobs, testing, reconciliation and optional DB2/JDBC integration. Includes asset-backed assertions, pytest examples, setup guidance and a static validation report.
+
+## Diabetes prediction learning project
+
+[Open the Databricks + MLflow diabetes notebook](projects/diabetes-prediction/README.md): step-by-step asset preflight, historical binary-label classification, model comparison, leakage-aware evaluation, threshold-aware packaging and MLflow tracking. Requires genuine Pima training/test files in a Databricks-provided sample asset location; individual workspace asset availability remains unverified until its preflight passes. Educational use only; no clinical performance or diagnostic deployment is claimed.
